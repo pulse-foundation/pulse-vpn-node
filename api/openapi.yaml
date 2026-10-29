@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: Pulse VPN Node
+  version: 0.1.0
+  description: Minimal agent/core lifecycle API; VPN listeners are not configured yet.
+security:
+  - nodeToken: []
+paths:
+  /api/v1/status:
+    get:
+      operationId: getRuntimeStatus
+      summary: Read agent/core readiness, not end-to-end VPN health
+      responses:
+        '200':
+          description: Agent is serving and the pinned core controller responds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Core is unavailable or reports an unexpected version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+components:
+  securitySchemes:
+    nodeToken:
+      type: http
+      scheme: bearer
+  schemas:
+    Status:
+      type: object
+      required: [status, vpnConfigured, core]
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        vpnConfigured:
+          type: boolean
+          enum: [false]
+        core:
+          type: object
+          properties:
+            version:
+              type: string

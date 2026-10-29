@@ -1,7 +1,8 @@
 # Pulse VPN Node architecture baseline
 
 Status: initial implementation baseline, 2026-10-30. These boundaries describe the intended
-first implementation, not existing functionality. User requirements take precedence.
+first implementation. The executable currently covers only the local agent/core lifecycle and
+authenticated readiness API, with no VPN listeners. User requirements take precedence.
 
 ## Responsibilities and deployment
 

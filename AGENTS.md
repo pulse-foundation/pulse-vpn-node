@@ -1,7 +1,7 @@
 # Pulse VPN Node Agent Instructions
 
-This is the public GPLv3 server component for Pulse VPN. The repository currently contains
-documentation only; a documented directory or command is not evidence of an implementation.
+This is the public GPLv3 server component for Pulse VPN. The current implementation is a minimal
+Go agent + idle Mihomo runtime. A documented future directory or command is not evidence of implementation.
 Follow the checkout and current user request. Keep documentation-only work free of application code.
 
 ## Product boundaries

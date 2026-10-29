@@ -1,18 +1,86 @@
 # Pulse VPN Node
 
-Server agent for Pulse VPN: Go manages a separate Mihomo process serving VLESS + REALITY.
-Clients connect directly to the VPN node. The Pulse VPN control panel remains a separate project.
+Go server agent for Pulse VPN, managing a separate pinned Mihomo process. The Pulse control panel
+remains a separate project. This repository is GPLv3.
 
-**Status:** architecture and agent guidance only. There is no runnable application or image yet.
+**Current status:** local agent/core lifecycle only. It validates an idle configuration, starts
+Mihomo, checks its controller version, serves authenticated readiness, and stops/reaps the child.
+There are **no VPN listeners or users yet**. Readiness reports `vpnConfigured: false`; it does not
+prove a working VPN. Persistence, user operations, telemetry and Pulse integration are planned.
 
-The initial deployment target is an agent + Mihomo container with a separate PostgreSQL service.
-User traffic reporting is approximate and is not intended for billing or strict traffic quotas.
+## Run locally
 
-- [Architecture and package boundaries](docs/architecture.md)
-- [Go conventions and planned quality checks](docs/go-conventions.md)
-- [Contributor/agent instructions](AGENTS.md)
+Requires Docker with Compose. Go need not be installed on the host. Build inputs are pinned to
+Go 1.26.10 and Mihomo v1.19.33 by image digest; see [dependencies](docs/dependencies.md).
 
-Repository-local skills live under `.agents/skills` and are routed from `AGENTS.md`.
-Application directories will be created alongside working implementations, not as empty scaffolding.
+From the repository root, create a token once:
 
-Licensed under [GNU GPLv3](LICENSE). Third-party components retain their own licenses.
+```sh
+mkdir -p .local
+chmod 700 .local
+test -f .local/api-token || (umask 077; openssl rand -hex 32 > .local/api-token)
+chmod 644 .local/api-token
+docker compose -f deploy/compose.yaml up --build --wait
+```
+
+The parent directory is private on the host. The token file is readable by the container's non-root
+user through its read-only Compose secret mount; do not relax the parent directory's permissions.
+`.local/` is excluded from Git and the Docker build context. Do not print or commit its contents.
+
+The API is published only at `127.0.0.1:18080`; set `PULSE_NODE_PORT` to override the host port.
+The core controller stays inside the container at `127.0.0.1:19090` with a random per-launch secret.
+The container runs without root, extra capabilities, a writable root filesystem, or a Docker socket.
+Private runtime artifacts live on bounded tmpfs. PostgreSQL is intentionally absent from this first
+lifecycle slice; it will be a separate service when durable operations are implemented.
+
+Read authenticated status without putting credentials in command arguments:
+
+```sh
+docker compose -f deploy/compose.yaml exec node pulse-vpn-node status
+```
+
+Expected:
+
+```json
+{"status":"ready","vpnConfigured":false,"core":{"version":"v1.19.33"}}
+```
+
+`GET /api/v1/status` requires `Authorization: Bearer <token>` and returns 401 without it. Core
+unavailability/version mismatch returns 503 while the agent is serving. Unexpected core exit stops
+the agent with a nonzero exit code. Local Compose does not auto-restart failures, so they remain
+visible. Raw core output is discarded to avoid leaking generated configuration or secrets; startup
+and lifecycle failures are reported with safe messages. Start the service again after diagnosing.
+
+```sh
+docker compose -f deploy/compose.yaml logs --tail=50 node
+docker compose -f deploy/compose.yaml down
+```
+
+## Verify
+
+The Docker build runs formatting verification, `go vet`, unit tests, race tests, and a static build.
+To run only that stage:
+
+```sh
+docker build --target check -t pulse-vpn-node-check:local .
+```
+
+With the local image built and `.local/api-token` created, the integration smoke test uses a separate
+Compose project and loopback port 18081 (override with `PULSE_NODE_SMOKE_PORT`). It checks real core
+readiness, API authentication, core crash propagation, restart, invalid binary startup, and SIGTERM
+shutdown, then removes only its own containers/network. Python 3 is needed for this test.
+
+```sh
+python3 tests/integration/docker_smoke.py
+```
+
+With Go 1.26.10 installed: `go vet ./...`, `go test ./...`, `go test -race ./...`, and
+`go build ./cmd/pulse-vpn-node`. Runtime/process tests target Unix; Docker is the reference environment.
+
+## Guidance
+
+- [Architecture and planned package boundaries](docs/architecture.md)
+- [Go conventions](docs/go-conventions.md)
+- [Agent rules and skill routing](AGENTS.md)
+- [HTTP contract](api/openapi.yaml)
+- [GNU GPLv3](LICENSE)

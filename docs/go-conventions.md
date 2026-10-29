@@ -1,7 +1,7 @@
 # Go conventions for Pulse VPN Node
 
-These are implementation defaults. No Go toolchain, module, migration tool, or CI commands exist
-in the repository yet; add runnable commands together with their implementation.
+These are implementation defaults. The Go module and Docker verification target exist; migration
+tooling and CI are not implemented yet. Add runnable commands together with their implementation.
 
 ## Code and ownership
 
@@ -44,7 +44,7 @@ PostgreSQL for transaction/migration semantics and the pinned core for reload/co
 Wait on conditions with deadlines rather than fixed sleeps. Test outcomes and failure recovery,
 not private helper calls or source-text patterns. Run subprocess failure tests without exposing secrets.
 
-Once a Go module exists, the baseline is formatting, `go vet ./...`, `go test ./...`, and
+The baseline is formatting, `go vet ./...`, `go test ./...`, and
 `go build ./cmd/pulse-vpn-node`. Run `go test -race ./...` for concurrency/lifecycle changes and in
 supported CI; provision its toolchain requirements rather than silently skipping it. Integration
 tests must have an explicit documented command and clean up only their own resources.

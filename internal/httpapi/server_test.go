@@ -13,7 +13,7 @@ import (
 func TestStatusAuthenticatesBeforeCheckingCore(t *testing.T) {
 	calls := 0
 	token := strings.Repeat("a", 64)
-	handler := New(token, func(context.Context) (string, error) { calls++; return "v1.19.33", nil })
+	handler := New(token, false, func(context.Context) (string, error) { calls++; return "v1.19.33", nil })
 	for _, auth := range []string{"", "Bearer wrong", "Basic " + token, "Bearer " + token + "extra"} {
 		req := httptest.NewRequest("GET", "/api/v1/status", nil)
 		req.Header.Set("Authorization", auth)
@@ -38,7 +38,7 @@ func TestStatusReadyAndDegraded(t *testing.T) {
 		{"ready", nil, 200, "ready"}, {"degraded", errors.New("secret child diagnostics"), 503, "degraded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := New("test-token", func(context.Context) (string, error) { return "v1.19.33", tc.err })
+			handler := New("test-token", false, func(context.Context) (string, error) { return "v1.19.33", tc.err })
 			req := httptest.NewRequest("GET", "/api/v1/status", nil)
 			req.Header.Set("Authorization", "Bearer test-token")
 			res := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestStatusReadyAndDegraded(t *testing.T) {
 }
 
 func TestUnknownRouteAndWrongMethod(t *testing.T) {
-	handler := New("test-token", func(context.Context) (string, error) { t.Fatal("unexpected core request"); return "", nil })
+	handler := New("test-token", false, func(context.Context) (string, error) { t.Fatal("unexpected core request"); return "", nil })
 	for _, tc := range []struct {
 		method, path string
 		code         int
@@ -85,5 +85,23 @@ func TestUnknownRouteAndWrongMethod(t *testing.T) {
 		if res.Code != tc.code {
 			t.Fatalf("%s %s: %d", tc.method, tc.path, res.Code)
 		}
+	}
+}
+
+func TestStatusReportsConfiguredVPNWithoutExposingSettings(t *testing.T) {
+	handler := New("test-token", true, func(context.Context) (string, error) { return "v1.19.33", nil })
+	req := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	var got Status
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != 200 || !got.VPNConfigured {
+		t.Fatal("configured listener not reported")
+	}
+	if strings.Contains(res.Body.String(), "uuid") || strings.Contains(res.Body.String(), "privateKey") {
+		t.Fatal("VPN settings exposed")
 	}
 }

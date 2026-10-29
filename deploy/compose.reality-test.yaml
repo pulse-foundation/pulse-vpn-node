@@ -1,0 +1,94 @@
+name: pulse-vpn-node-reality-test
+
+x-client: &client
+  image: metacubex/mihomo:v1.19.33@sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c
+  user: "10001:10001"
+  volumes: ["fixtures:/fixtures:ro"]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,mode=1777"]
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  networks: [front]
+  depends_on:
+    node:
+      condition: service_healthy
+
+services:
+  generate:
+    image: pulse-vpn-node-reality-lab:local
+    build:
+      context: ..
+      dockerfile: tests/integration/realitylab/Dockerfile
+    user: "0:0"
+    command: [generate]
+    volumes: ["fixtures:/fixtures"]
+    network_mode: none
+
+  target:
+    image: pulse-vpn-node-reality-lab:local
+    command: [target]
+    volumes: ["fixtures:/fixtures:ro"]
+    read_only: true
+    cap_drop: [ALL]
+    networks: [back]
+    depends_on:
+      generate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, reality-lab, target-health]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  node:
+    image: pulse-vpn-node:reality-test
+    build:
+      context: ..
+      target: runtime
+    environment:
+      PULSE_NODE_TOKEN_FILE: /fixtures/api-token
+      PULSE_NODE_VLESS_FILE: /fixtures/server.json
+    volumes: ["fixtures:/fixtures:ro"]
+    tmpfs:
+      - /run/pulse-node:rw,noexec,nosuid,size=16m,mode=0700,uid=10001,gid=10001
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    stop_grace_period: 15s
+    networks: [front, back]
+    depends_on:
+      target:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, pulse-vpn-node, healthcheck]
+      interval: 2s
+      timeout: 4s
+      retries: 15
+
+  client:
+    <<: *client
+    command: [-d, /tmp/client, -f, /fixtures/client.json]
+  bad-uuid:
+    <<: *client
+    command: [-d, /tmp/client, -f, /fixtures/bad-uuid.json]
+  bad-key:
+    <<: *client
+    command: [-d, /tmp/client, -f, /fixtures/bad-key.json]
+
+  probe:
+    image: pulse-vpn-node-reality-lab:local
+    command: [probe]
+    volumes: ["fixtures:/fixtures:ro"]
+    read_only: true
+    cap_drop: [ALL]
+    networks: [front]
+    profiles: [test]
+
+networks:
+  front:
+    internal: true
+  back:
+    internal: true
+volumes:
+  fixtures:

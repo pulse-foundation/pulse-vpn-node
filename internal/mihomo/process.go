@@ -13,16 +13,23 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
 )
 
-type Options struct{ Binary, Directory, ControllerAddress string }
+type Options struct {
+	Binary, Directory, ControllerAddress string
+	VLESS                                *node.VLESS
+}
 
 type Process struct {
-	cmd        *exec.Cmd
-	done       chan struct{}
-	err        error // Written before done closes; read only after observing done.
-	configPath string
-	controller *Controller
+	cmd          *exec.Cmd
+	done         chan struct{}
+	err          error // Written before done closes; read only after observing done.
+	configPath   string
+	controller   *Controller
+	probeAddress string
+	vpnPort      int
 }
 
 // Start uses ctx only for startup validation. The caller owns Stop for the child lifetime.
@@ -32,6 +39,22 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	ip := net.ParseIP(host)
 	if err != nil || portErr != nil || ip == nil || !ip.IsLoopback() || n < 1 || n > 65535 {
 		return nil, errors.New("core controller must bind a loopback IP and valid port")
+	}
+	probeAddress := ""
+	if o.VLESS != nil {
+		if err := o.VLESS.Validate(); err != nil {
+			return nil, err
+		}
+		if o.VLESS.Port == n {
+			return nil, errors.New("VLESS port conflicts with core controller")
+		}
+		// Fail before spawning if occupied; readiness and end-to-end tests check the actual listener.
+		l, err := net.Listen("tcp", o.VLESS.Address())
+		if err != nil {
+			return nil, errors.New("VLESS listen address is unavailable")
+		}
+		_ = l.Close()
+		probeAddress = o.VLESS.ProbeAddress()
 	}
 	if err := os.MkdirAll(o.Directory, 0700); err != nil {
 		return nil, errors.New("cannot create runtime directory")
@@ -51,9 +74,9 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 		return nil, errors.New("cannot create controller secret")
 	}
 	secret := hex.EncodeToString(entropy[:])
-	data, err := renderIdle(o.ControllerAddress, secret)
+	data, err := render(o.ControllerAddress, secret, o.VLESS)
 	if err != nil {
-		return nil, errors.New("cannot render idle core configuration")
+		return nil, errors.New("cannot render core configuration")
 	}
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -77,7 +100,10 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, errors.New("cannot start core process")
 	}
-	p := &Process{cmd: cmd, done: make(chan struct{}), configPath: path, controller: NewController("http://"+o.ControllerAddress, secret)}
+	p := &Process{cmd: cmd, done: make(chan struct{}), configPath: path, controller: NewController("http://"+o.ControllerAddress, secret), probeAddress: probeAddress}
+	if o.VLESS != nil {
+		p.vpnPort = o.VLESS.Port
+	}
 	started = true
 	go func() {
 		if err := cmd.Wait(); err != nil {
@@ -99,6 +125,26 @@ func (p *Process) Version(ctx context.Context) (string, error) {
 	default:
 	}
 	return p.controller.Version(ctx)
+}
+
+// Ready verifies controller, listener ownership and TCP reachability, not end-to-end VPN health.
+func (p *Process) Ready(ctx context.Context) (string, error) {
+	version, err := p.Version(ctx)
+	if err != nil {
+		return "", err
+	}
+	if p.probeAddress != "" {
+		if err := ownsListener(ctx, p.cmd.Process.Pid, p.vpnPort); err != nil {
+			return "", err
+		}
+		d := net.Dialer{Timeout: time.Second}
+		conn, err := d.DialContext(ctx, "tcp", p.probeAddress)
+		if err != nil {
+			return "", errors.New("VLESS listener unavailable")
+		}
+		_ = conn.Close()
+	}
+	return version, nil
 }
 
 func (p *Process) Stop(ctx context.Context) error {

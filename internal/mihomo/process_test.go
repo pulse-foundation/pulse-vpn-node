@@ -2,6 +2,8 @@ package mihomo
 
 import (
 	"context"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,24 @@ func fakeCore(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func TestStartRejectsOccupiedVPNListener(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	dir := t.TempDir()
+	vpn := &node.VLESS{Listen: "127.0.0.1", Port: l.Addr().(*net.TCPAddr).Port, Users: []node.User{{Name: "local", UUID: "f47ac10b-58cc-4372-a567-0e02b2c3d479"}}, Reality: node.Reality{Destination: "target:8443", PrivateKey: "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s", ShortIDs: []string{"abcd"}, ServerNames: []string{"target.test"}}}
+	p, err := Start(context.Background(), Options{Binary: "/missing", Directory: dir, ControllerAddress: "127.0.0.1:19090", VLESS: vpn})
+	if p != nil || err == nil || err.Error() != "VLESS listen address is unavailable" {
+		t.Fatalf("unexpected result: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Fatal("artifacts left on bind failure")
+	}
 }
 
 func TestStartRejectsInvalidCandidateAndCleansUp(t *testing.T) {

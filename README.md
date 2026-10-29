@@ -3,10 +3,14 @@
 Go server agent for Pulse VPN, managing a separate pinned Mihomo process. The Pulse control panel
 remains a separate project. This repository is GPLv3.
 
-**Current status:** local agent/core lifecycle only. It validates an idle configuration, starts
-Mihomo, checks its controller version, serves authenticated readiness, and stops/reaps the child.
-There are **no VPN listeners or users yet**. Readiness reports `vpnConfigured: false`; it does not
-prove a working VPN. Persistence, user operations, telemetry and Pulse integration are planned.
+**Current status:** local agent/core lifecycle and optional startup-configured VLESS + REALITY
+over raw TCP with Vision. The agent validates settings, starts the pinned Mihomo child, serves
+authenticated readiness, and stops/reaps the child. Without a VPN file it starts idle and reports
+`vpnConfigured: false`. Persistence, live user operations, telemetry and Pulse integration are planned.
+
+The agent lifecycle uses shared `node.Core` / `node.Runtime` contracts. Mihomo is the only implemented
+adapter; adding another core requires its adapter, wiring and packaging, without changing the HTTP
+API or serving lifecycle. See the [adapter boundary](docs/architecture.md#core-adapter-boundary).
 
 ## Run locally
 
@@ -58,6 +62,16 @@ docker compose -f deploy/compose.yaml down
 
 ## Verify
 
+The isolated VPN test starts an agent-managed server and a separate Mihomo client, both v1.19.33,
+with fresh credentials and local HTTP/HTTPS/UDP targets. It publishes no host ports, uses no existing
+VPN profile, and removes its own containers, networks and credentials afterward:
+
+```sh
+python3 tests/integration/reality_smoke.py
+```
+
+See [local VLESS + REALITY](docs/local-reality.md) for configuration and the test's limits.
+
 The Docker build runs formatting verification, `go vet`, unit tests, race tests, and a static build.
 To run only that stage:
 
@@ -73,6 +87,9 @@ shutdown, then removes only its own containers/network. Python 3 is needed for t
 ```sh
 python3 tests/integration/docker_smoke.py
 ```
+
+Set `PULSE_NODE_IMAGE` to use a different local image tag, for example
+`PULSE_NODE_IMAGE=pulse-vpn-node:reality-test python3 tests/integration/docker_smoke.py`.
 
 With Go 1.26.10 installed: `go vet ./...`, `go test ./...`, `go test -race ./...`, and
 `go build ./cmd/pulse-vpn-node`. Runtime/process tests target Unix; Docker is the reference environment.

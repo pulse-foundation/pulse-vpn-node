@@ -1,7 +1,7 @@
 name: pulse-vpn-node-local
 services:
   node:
-    image: pulse-vpn-node:local
+    image: ${PULSE_NODE_IMAGE:-pulse-vpn-node:local}
     build:
       context: ..
       target: runtime

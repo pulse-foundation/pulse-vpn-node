@@ -1,8 +1,14 @@
 # Pulse VPN Node architecture baseline
 
 Status: initial implementation baseline, 2026-10-30. These boundaries describe the intended
-first implementation. The executable currently covers only the local agent/core lifecycle and
-authenticated readiness API, with no VPN listeners. User requirements take precedence.
+first implementation. The executable currently covers the local agent/core lifecycle, authenticated
+readiness API, and optional startup-configured VLESS + REALITY/Vision. User requirements take precedence.
+
+The current startup slice reads a bounded, validated JSON file through `internal/config` into the
+`internal/node` model; `internal/mihomo` renders it for the pinned core. There is no raw core-config
+passthrough. No file means idle; an invalid file fails startup. File edits require an explicit restart
+in this slice. This is not the planned user-management API: durable revisions, live reload, PostgreSQL,
+traffic accounting and telemetry below remain unimplemented. See [local setup](local-reality.md).
 
 ## Responsibilities and deployment
 
@@ -63,6 +69,31 @@ Use named files such as `users.go`, `reconcile.go`, `render.go`, `controller.go`
 and `checkpoints.go` within these packages. File names do not require matching subpackages.
 
 ## Initial technical choices
+
+### Core adapter boundary
+
+`internal/node/core.go` defines the shared `Core` startup and `Runtime` lifecycle contracts.
+`Core.Start` accepts the node's VLESS settings (nil means idle) and transfers ownership of a runtime
+to the caller. Errors must be sanitized; unsuccessful startup must clean up partial resources.
+The settings are read-only input, not a mutable configuration shared with a background process.
+
+The serving lifecycle in `internal/app/app.go` uses only that contract: readiness, termination
+notification and bounded stop/reap. It obtains the actual version from the adapter, rather than
+assuming Mihomo's pinned version. HTTP status remains core-independent and readiness still does
+not claim end-to-end connectivity. `internal/app/wiring.go` is the concrete composition point.
+
+`internal/mihomo.Adapter` is the only implemented adapter. It keeps the controller address/protocol,
+version validation, config rendering, child process and listener-ownership checks within Mihomo.
+A future sing-box adapter must implement the same contracts and its own compatibility tests, then
+be wired and packaged explicitly. Its binary/settings and selection belong to composition and
+deployment; there is no automatic discovery, runtime switching, sing-box stub or silent fallback.
+The existing `PULSE_NODE_MIHOMO_BINARY` setting remains Mihomo-specific.
+
+Live user changes, revocation and traffic capabilities are not part of this startup contract yet.
+Add narrow contracts when those features are implemented and tested for each adapter; do not claim
+equivalent reload/accounting semantics merely because both cores implement `Runtime`.
+
+### Libraries and operations
 
 - Prefer standard `net/http`, explicit constructors, `log/slog`, and Go's test tooling.
 - Prefer `pgx`/`pgxpool` and explicit SQL for PostgreSQL. Select and pin a migration runner when

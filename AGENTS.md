@@ -1,13 +1,16 @@
 # Pulse VPN Node Agent Instructions
 
 This is the public GPLv3 server component for Pulse VPN. The current implementation is a minimal
-Go agent + idle Mihomo runtime. A documented future directory or command is not evidence of implementation.
+Go agent with an optional startup-configured VLESS + REALITY Mihomo listener. A documented future
+directory or command is not evidence of implementation.
 Follow the checkout and current user request. Keep documentation-only work free of application code.
 
 ## Product boundaries
 
 - Use Go for the agent and an unmodified, version-pinned Mihomo child process for VLESS + REALITY.
-  Protocol changes, alternative cores, and embedding Mihomo as a library are separate decisions.
+  The lifecycle depends on `node.Core` / `node.Runtime`; select concrete adapters in `internal/app/wiring.go`.
+  Keep core-specific configuration and controller details in the adapter. Mihomo is the only implemented
+  adapter; adding alternative cores or changing protocols requires explicit scope and compatibility tests.
 - The deployment baseline is one agent + Mihomo container and a separate PostgreSQL Compose service.
   The agent manages its own child, not the Docker daemon or the VPS operating system.
 - Pulse VPN remains the separate private control panel. Clients connect directly to this node.

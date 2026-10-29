@@ -21,16 +21,16 @@ type CoreStatus struct {
 }
 
 // New exposes process readiness only. It does not claim VPN connectivity.
-func New(token string, check func(context.Context) (string, error)) http.Handler {
+func New(token string, vpnConfigured bool, check func(context.Context) (string, error)) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
 		version, err := check(ctx)
-		status := Status{Status: "ready", Core: CoreStatus{Version: version}}
+		status := Status{Status: "ready", VPNConfigured: vpnConfigured, Core: CoreStatus{Version: version}}
 		code := http.StatusOK
 		if err != nil {
-			status = Status{Status: "degraded"}
+			status = Status{Status: "degraded", VPNConfigured: vpnConfigured}
 			code = http.StatusServiceUnavailable
 		}
 		w.Header().Set("Content-Type", "application/json")

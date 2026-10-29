@@ -10,16 +10,16 @@ import (
 
 	"github.com/pulse-foundation/pulse-vpn-node/internal/config"
 	"github.com/pulse-foundation/pulse-vpn-node/internal/httpapi"
-	"github.com/pulse-foundation/pulse-vpn-node/internal/mihomo"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
 )
 
-func Run(ctx context.Context, cfg config.Config) error {
+func run(ctx context.Context, cfg config.Config, adapter node.Core) error {
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return errors.New("cannot bind management listener")
 	}
 	defer listener.Close()
-	core, err := mihomo.Start(ctx, mihomo.Options{Binary: cfg.Binary, Directory: cfg.RuntimeDir, ControllerAddress: "127.0.0.1:19090"})
+	core, err := adapter.Start(ctx, cfg.VLESS)
 	if err != nil {
 		return err
 	}
@@ -30,13 +30,14 @@ func Run(ctx context.Context, cfg config.Config) error {
 			slog.Error("core shutdown failed", "error", err)
 		}
 	}()
-	if err := waitReady(ctx, core); err != nil {
+	version, err := waitReady(ctx, core)
+	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: httpapi.New(cfg.Token, core.Version), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
+	server := &http.Server{Handler: httpapi.New(cfg.Token, cfg.VLESS != nil, core.Ready), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()
-	slog.Info("agent ready", "coreVersion", mihomo.Version, "vpnConfigured", false)
+	slog.Info("agent ready", "coreVersion", version, "vpnConfigured", cfg.VLESS != nil)
 	var result error
 	select {
 	case <-ctx.Done():
@@ -55,20 +56,20 @@ func Run(ctx context.Context, cfg config.Config) error {
 	return result
 }
 
-func waitReady(ctx context.Context, core *mihomo.Process) error {
+func waitReady(ctx context.Context, core node.Runtime) (string, error) {
 	readyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if _, err := core.Version(readyCtx); err == nil {
-			return nil
+		if version, err := core.Ready(readyCtx); err == nil {
+			return version, nil
 		}
 		select {
 		case <-readyCtx.Done():
-			return errors.New("core readiness deadline exceeded or startup cancelled")
+			return "", errors.New("core readiness deadline exceeded or startup cancelled")
 		case <-core.Done():
-			return errors.New("core exited before readiness")
+			return "", errors.New("core exited before readiness")
 		case <-ticker.C:
 		}
 	}

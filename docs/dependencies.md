@@ -20,3 +20,8 @@ This is a local development image, not a published release. Before distribution,
 license notices and corresponding-source materials for the exact shipped dependencies and build.
 For a core/toolchain upgrade, update pins, runtime version verification and compatibility evidence
 together. A successful idle startup is not evidence of VLESS/REALITY compatibility.
+
+The local VLESS/REALITY acceptance test uses v1.19.33 for both server and client, raw TCP + Vision,
+and XUDP. It verifies HTTP/HTTPS payload integrity, UDP echo, invalid credentials, occupied-port
+rejection and no direct fallback after node shutdown. See [test instructions](local-reality.md).
+This evidence does not cover production routing, filtering, mobile app builds or core upgrades.

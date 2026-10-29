@@ -21,6 +21,10 @@ func main() {
 		err = serveTarget()
 	case "target-health":
 		err = targetHealth()
+	case "users-live":
+		err = liveUsers()
+	case "users-persist":
+		err = persistedUsers()
 	case "probe":
 		err = probe()
 	case "reject-bad-uuid":
@@ -33,6 +37,9 @@ func main() {
 		err = fmt.Errorf("unknown fixture command")
 	}
 	if err != nil {
+		if os.Args[1] == "users-live" || os.Args[1] == "users-persist" {
+			fmt.Println("FAIL: " + err.Error())
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

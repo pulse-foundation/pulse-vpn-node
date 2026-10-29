@@ -30,6 +30,13 @@ func generate() error {
 		return err
 	}
 	id := newUUID()
+	secondID := newUUID()
+	password := randomHex(32)
+	for name, value := range map[string]string{"second-uuid": secondID, "postgres-password": password, "database-url": "postgres://pulse_test:" + password + "@database:5432/pulse_test?sslmode=disable"} {
+		if err := writeFile(name, []byte(value)); err != nil {
+			return err
+		}
+	}
 	sid := randomHex(8)
 	vpn := node.VLESS{Listen: "0.0.0.0", Port: 8443, Users: []node.User{{Name: "local-test", UUID: id}}, Reality: node.Reality{Destination: "target:8443", PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), ShortIDs: []string{sid}, ServerNames: []string{"target.test"}}}
 	if err := vpn.Validate(); err != nil {
@@ -43,7 +50,7 @@ func generate() error {
 	}
 	pub := base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())
 	for _, tc := range []struct{ file, uuid, key string }{
-		{"client.json", id, pub}, {"bad-uuid.json", newUUID(), pub},
+		{"client.json", id, pub}, {"second.json", secondID, pub}, {"bad-uuid.json", newUUID(), pub},
 		{"bad-key.json", id, base64.RawURLEncoding.EncodeToString(badKey.PublicKey().Bytes())},
 	} {
 		cfg := map[string]any{"mixed-port": 7890, "allow-lan": true, "bind-address": "0.0.0.0", "mode": "rule", "log-level": "silent", "ipv6": false, "find-process-mode": "off", "geo-auto-update": false,

@@ -2,7 +2,7 @@
 
 The agent supports one VLESS listener over raw TCP, with REALITY and `xtls-rprx-vision` for every
 configured user. Server and test client use unmodified Mihomo v1.19.33. This is a local startup
-configuration slice; user CRUD, live reload and PostgreSQL are not implemented yet.
+configuration mode. Optional [live users](live-users.md) adds PostgreSQL-backed management.
 
 ## Reproducible connection test
 
@@ -55,7 +55,7 @@ startup. Required fields are:
 | --- | --- |
 | `listen` | Literal IP to bind inside the container, such as `0.0.0.0` |
 | `port` | TCP port 1–65535; avoid management ports; the lab uses 8443 |
-| `users` | Nonempty array of `{ "name": ..., "uuid": ... }`; names and UUIDs must be unique |
+| `users` | Array of `{ "name": ..., "uuid": ... }`; unique identities, empty denies all users |
 | `reality.destination` | Reachable TLS destination `host:port` compatible with REALITY |
 | `reality.privateKey` | 32-byte X25519 private key in unpadded base64url |
 | `reality.shortIds` | Nonempty array of nonempty even-length hexadecimal IDs, at most 8 bytes each |

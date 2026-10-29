@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,5 +57,54 @@ func TestRenderVLESSRealityAndIdle(t *testing.T) {
 	vpn.Reality.PrivateKey = ""
 	if _, err := render("127.0.0.1:19090", "controller-secret", vpn); err == nil {
 		t.Fatal("invalid REALITY rendered as plaintext")
+	}
+}
+
+// Removing a credential must also reject flows created by an already authenticated
+// UDP/mux parent after its outbound tracker was closed by the controller.
+func TestRenderAuthorizesOnlyCurrentInboundUsers(t *testing.T) {
+	vpn := &node.VLESS{Listen: "0.0.0.0", Port: 8443, Users: []node.User{{Name: "alice", UUID: "f47ac10b-58cc-4372-a567-0e02b2c3d479"}, {Name: "bob", UUID: "f47ac10b-58cc-4372-a567-0e02b2c3d480"}}, Reality: node.Reality{Destination: "target:8443", PrivateKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), ShortIDs: []string{"abcd"}, ServerNames: []string{"target.test"}}}
+	for _, names := range [][]string{{"alice", "bob"}, {"bob"}, {}} {
+		t.Run(strings.Join(names, "-"), func(t *testing.T) {
+			snapshot := *vpn
+			snapshot.Users = nil
+			for _, name := range names {
+				for _, u := range vpn.Users {
+					if u.Name == name {
+						snapshot.Users = append(snapshot.Users, u)
+					}
+				}
+			}
+			raw, err := render("127.0.0.1:19090", "controller-secret", &snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Mode      string   `json:"mode"`
+				Rules     []string `json:"rules"`
+				Listeners []struct {
+					Reality struct {
+						Proxy string `json:"proxy"`
+					} `json:"reality-config"`
+				} `json:"listeners"`
+			}
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Mode != "rule" {
+				t.Fatal("identity authorization rules are bypassed")
+			}
+			expected := make([]string, 0, len(names)+1)
+			for _, name := range names {
+				expected = append(expected, "IN-USER,"+name+",DIRECT")
+			}
+			expected = append(expected, "MATCH,REJECT")
+			if !slices.Equal(got.Rules, expected) {
+				t.Fatal("egress is not limited to current identities")
+			}
+			if len(got.Listeners) != 1 || got.Listeners[0].Reality.Proxy != "DIRECT" {
+				t.Fatal("REALITY target cannot dial independently of user authorization")
+			}
+		})
 	}
 }

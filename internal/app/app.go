@@ -14,6 +14,10 @@ import (
 )
 
 func run(ctx context.Context, cfg config.Config, adapter node.Core) error {
+	return runManaged(ctx, cfg, adapter, nil)
+}
+
+func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store node.UserStore) error {
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return errors.New("cannot bind management listener")
@@ -34,7 +38,19 @@ func run(ctx context.Context, cfg config.Config, adapter node.Core) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: httpapi.New(cfg.Token, cfg.VLESS != nil, core.Ready), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
+	var manager *node.UserManager
+	if store != nil {
+		users, ok := core.(node.UserRuntime)
+		if !ok {
+			return errors.New("selected core does not support live users")
+		}
+		manager = node.NewUserManager(store, users)
+		workerCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); manager.Run(workerCtx) }()
+		defer func() { cancel(); <-done }()
+	}
+	server := &http.Server{Handler: httpapi.NewWithUsers(cfg.Token, cfg.VLESS != nil, core.Ready, manager), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()
 	slog.Info("agent ready", "coreVersion", version, "vpnConfigured", cfg.VLESS != nil)

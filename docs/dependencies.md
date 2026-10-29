@@ -25,3 +25,7 @@ The local VLESS/REALITY acceptance test uses v1.19.33 for both server and client
 and XUDP. It verifies HTTP/HTTPS payload integrity, UDP echo, invalid credentials, occupied-port
 rejection and no direct fallback after node shutdown. See [test instructions](local-reality.md).
 This evidence does not cover production routing, filtering, mobile app builds or core upgrades.
+
+User management adds pgx v5.11.0 (MIT, github.com/jackc/pgx) with exact transitive versions/checksums
+in go.mod/go.sum. Local Compose pins PostgreSQL 17 Alpine by image digest. PostgreSQL is a separate
+service, not embedded in the agent image. See [live user tests](live-users.md).

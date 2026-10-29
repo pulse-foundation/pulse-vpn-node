@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
 )
 
 type Status struct {
@@ -22,7 +24,12 @@ type CoreStatus struct {
 
 // New exposes process readiness only. It does not claim VPN connectivity.
 func New(token string, vpnConfigured bool, check func(context.Context) (string, error)) http.Handler {
+	return NewWithUsers(token, vpnConfigured, check, nil)
+}
+
+func NewWithUsers(token string, vpnConfigured bool, check func(context.Context) (string, error), users *node.UserManager) http.Handler {
 	mux := http.NewServeMux()
+	userRoutes(mux, users)
 	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()

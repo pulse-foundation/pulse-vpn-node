@@ -29,8 +29,13 @@ func run() error {
 		return err
 	}
 	if len(os.Args) > 1 {
+		if len(os.Args) == 2 && os.Args[1] == "migrate" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return app.Migrate(ctx, cfg)
+		}
 		if len(os.Args) != 2 || (os.Args[1] != "healthcheck" && os.Args[1] != "status") {
-			return errors.New("usage: pulse-vpn-node [healthcheck|status]")
+			return errors.New("usage: pulse-vpn-node [healthcheck|status|migrate]")
 		}
 		return check(cfg, os.Args[1] == "status")
 	}

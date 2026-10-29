@@ -6,7 +6,8 @@ remains a separate project. This repository is GPLv3.
 **Current status:** local agent/core lifecycle and optional startup-configured VLESS + REALITY
 over raw TCP with Vision. The agent validates settings, starts the pinned Mihomo child, serves
 authenticated readiness, and stops/reaps the child. Without a VPN file it starts idle and reports
-`vpnConfigured: false`. Persistence, live user operations, telemetry and Pulse integration are planned.
+`vpnConfigured: false`. Optional PostgreSQL-backed user management supports live add/enable/disable.
+Traffic accounting, telemetry and Pulse integration remain planned.
 
 The agent lifecycle uses shared `node.Core` / `node.Runtime` contracts. Mihomo is the only implemented
 adapter; adding another core requires its adapter, wiring and packaging, without changing the HTTP
@@ -35,7 +36,7 @@ The API is published only at `127.0.0.1:18080`; set `PULSE_NODE_PORT` to overrid
 The core controller stays inside the container at `127.0.0.1:19090` with a random per-launch secret.
 The container runs without root, extra capabilities, a writable root filesystem, or a Docker socket.
 Private runtime artifacts live on bounded tmpfs. PostgreSQL is intentionally absent from this first
-lifecycle slice; it will be a separate service when durable operations are implemented.
+idle mode. The optional managed overlay adds a separate database and explicit migration service.
 
 Read authenticated status without putting credentials in command arguments:
 
@@ -59,6 +60,11 @@ and lifecycle failures are reported with safe messages. Start the service again 
 docker compose -f deploy/compose.yaml logs --tail=50 node
 docker compose -f deploy/compose.yaml down
 ```
+
+## Live users
+
+See [live user management](docs/live-users.md) for the PostgreSQL overlay, API, idempotency and
+reconciliation behavior. Run its disposable local test with `python3 tests/integration/users_smoke.py`.
 
 ## Verify
 

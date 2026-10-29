@@ -1,7 +1,7 @@
 # Pulse VPN Node Agent Instructions
 
 This is the public GPLv3 server component for Pulse VPN. The current implementation is a minimal
-Go agent with an optional startup-configured VLESS + REALITY Mihomo listener. A documented future
+Go agent with VLESS + REALITY and optional PostgreSQL-backed live user management. A documented future
 directory or command is not evidence of implementation.
 Follow the checkout and current user request. Keep documentation-only work free of application code.
 

@@ -1,6 +1,7 @@
 package mihomo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,4 +50,40 @@ func (c *Controller) Version(ctx context.Context) (string, error) {
 		return "", errors.New("core version does not match pinned version")
 	}
 	return info.Version, nil
+}
+
+// Apply sends bytes already validated by the pinned binary. The controller's
+// response alone does not verify that listener creation succeeded.
+func (c *Controller) Apply(ctx context.Context, config []byte) error {
+	data, err := json.Marshal(struct {
+		Payload string `json:"payload"`
+	}{string(config)})
+	if err != nil {
+		return errors.New("cannot encode core reload")
+	}
+	res, err := c.request(ctx, http.MethodPut, "/configs?force=true", data)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		return errors.New("core reload failed; reconcile desired state")
+	}
+	return nil
+}
+
+func (c *Controller) request(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.url+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, errors.New("invalid core controller request")
+	}
+	req.Header.Set("Authorization", "Bearer "+c.secret)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	res, err := c.client.Do(req)
+	if err != nil {
+		return nil, errors.New("core controller request failed")
+	}
+	return res, nil
 }

@@ -25,6 +25,104 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Status'
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: Read desired users and runtime reconciliation state without credentials
+      responses:
+        '200':
+          description: Current desired users and runtime observations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Users'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Management not configured or database unavailable
+  /api/v1/users/{name}:
+    put:
+      operationId: changeUser
+      summary: Commit a user creation or enable/disable intent
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9_-]{1,64}$'
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, expectedRevision]
+              properties:
+                uuid:
+                  type: string
+                  format: uuid
+                  writeOnly: true
+                  description: Lowercase nonzero UUID required only on creation; omit for existing identity
+                enabled:
+                  type: boolean
+                expectedRevision:
+                  type: integer
+                  format: int64
+                  minimum: 0
+      responses:
+        '202':
+          description: Durable intent accepted or original idempotent result; poll the operation
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOperation'
+        '400':
+          description: Invalid or oversized input
+        '401':
+          description: Missing or invalid bearer token
+        '409':
+          description: Stale revision, identity conflict or reused idempotency key with changed body
+        '503':
+          description: Management not configured or database unavailable; retry identical request and key
+  /api/v1/operations/{revision}:
+    get:
+      operationId: getUserOperation
+      parameters:
+        - in: path
+          name: revision
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Durable outcome for this revision; session cleanup is reported separately
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOperation'
+        '400':
+          description: Invalid revision
+        '401':
+          description: Missing or invalid bearer token
+        '404':
+          description: Operation not found
+        '503':
+          description: Management not configured or database unavailable
 components:
   securitySchemes:
     nodeToken:
@@ -45,4 +143,52 @@ components:
           type: object
           properties:
             version:
+              type: string
+    UserOperation:
+      type: object
+      required: [revision, state]
+      properties:
+        revision:
+          type: integer
+          format: int64
+        state:
+          type: string
+          enum: [queued, applied, failed, superseded]
+        error:
+          type: string
+          description: Sanitized application failure, retryable by the reconciler
+    Users:
+      type: object
+      required: [revision, users, runtime]
+      properties:
+        revision:
+          type: integer
+          format: int64
+        users:
+          type: array
+          maxItems: 1024
+          items:
+            type: object
+            required: [name, enabled]
+            properties:
+              name:
+                type: string
+              enabled:
+                type: boolean
+        runtime:
+          type: object
+          required: [appliedRevision, cleanupState]
+          properties:
+            appliedRevision:
+              type: integer
+              format: int64
+              description: This process's last locally verified revision; zero before verification
+            applyingRevision:
+              type: integer
+              format: int64
+            cleanupState:
+              type: string
+              enum: [pending, retrying, observed_empty]
+              description: Repeated observation, never a strict drain guarantee
+            error:
               type: string

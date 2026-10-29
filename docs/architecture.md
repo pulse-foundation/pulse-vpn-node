@@ -7,8 +7,10 @@ readiness API, and optional startup-configured VLESS + REALITY/Vision. User requ
 The current startup slice reads a bounded, validated JSON file through `internal/config` into the
 `internal/node` model; `internal/mihomo` renders it for the pinned core. There is no raw core-config
 passthrough. No file means idle; an invalid file fails startup. File edits require an explicit restart
-in this slice. This is not the planned user-management API: durable revisions, live reload, PostgreSQL,
-traffic accounting and telemetry below remain unimplemented. See [local setup](local-reality.md).
+in startup-file mode. Optional PostgreSQL management now persists users, revisions and idempotent
+operations, and reconciles user changes through live reload. The file seeds users only once;
+transport changes still require restart. Traffic accounting and telemetry remain unimplemented.
+See [local setup](local-reality.md) and [live users](live-users.md).
 
 ## Responsibilities and deployment
 
@@ -89,15 +91,18 @@ be wired and packaged explicitly. Its binary/settings and selection belong to co
 deployment; there is no automatic discovery, runtime switching, sing-box stub or silent fallback.
 The existing `PULSE_NODE_MIHOMO_BINARY` setting remains Mihomo-specific.
 
-Live user changes, revocation and traffic capabilities are not part of this startup contract yet.
-Add narrow contracts when those features are implemented and tested for each adapter; do not claim
-equivalent reload/accounting semantics merely because both cores implement `Runtime`.
+The optional `node.UserRuntime` contract now provides live user replacement and targeted revoked
+session sweeps; `node.UserStore` persists intent independently of the adapter. The application owns
+one reconciler and repeats cleanup after late observations. Failed/ambiguous reloads keep latest
+cleanup intent separate from last verified revision, including during database outages. No automatic
+rollback may re-enable revoked users. Traffic capabilities remain separate and unimplemented.
+Implementing `Runtime` alone does not imply live-user or accounting support.
 
 ### Libraries and operations
 
 - Prefer standard `net/http`, explicit constructors, `log/slog`, and Go's test tooling.
-- Prefer `pgx`/`pgxpool` and explicit SQL for PostgreSQL. Select and pin a migration runner when
-  migrations are implemented; do not introduce an ORM or SQL generator without a concrete benefit.
+- Use pinned `pgx`/`pgxpool` and explicit SQL for PostgreSQL. The `migrate` command applies reviewed
+  embedded versioned SQL with a transaction lock and checksum validation; no automatic schema sync.
 - Select the supported Go version at implementation time and keep module, CI, and image versions
   consistent. Record exact Mihomo version, download checksums, and compatibility evidence.
 - Use OpenAPI-ready request/response types. Do not expose internal database structs or raw core

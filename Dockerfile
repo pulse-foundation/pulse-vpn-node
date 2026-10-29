@@ -1,8 +1,10 @@
 FROM metacubex/mihomo:v1.19.33@sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c AS core
 FROM golang:1.26-bookworm@sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb AS check
 WORKDIR /src
-ENV GOTOOLCHAIN=local GOPROXY=off
-COPY go.mod ./
+ENV GOTOOLCHAIN=local
+COPY go.mod go.sum ./
+RUN go mod download
+ENV GOPROXY=off
 COPY cmd ./cmd
 COPY internal ./internal
 RUN test -z "$(gofmt -l cmd internal)" && go vet ./... && go test ./... && go test -race ./...

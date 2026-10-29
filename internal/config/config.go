@@ -10,11 +10,12 @@ import (
 )
 
 type Config struct {
-	Listen     string
-	Token      string
-	Binary     string
-	RuntimeDir string
-	VLESS      *node.VLESS
+	Listen      string
+	Token       string
+	Binary      string
+	RuntimeDir  string
+	DatabaseURL string
+	VLESS       *node.VLESS
 }
 
 func Load() (Config, error) {
@@ -48,6 +49,21 @@ func Load() (Config, error) {
 		cfg.VLESS, err = loadVLESS(file)
 		if err != nil {
 			return Config{}, err
+		}
+	}
+	if file := os.Getenv("PULSE_NODE_DATABASE_URL_FILE"); file != "" {
+		f, err := os.Open(file)
+		if err != nil {
+			return Config{}, errors.New("cannot open database URL file")
+		}
+		defer f.Close()
+		raw, err := io.ReadAll(io.LimitReader(f, 4097))
+		if err != nil || len(raw) > 4096 {
+			return Config{}, errors.New("invalid database URL file")
+		}
+		cfg.DatabaseURL = strings.TrimSpace(string(raw))
+		if cfg.DatabaseURL == "" {
+			return Config{}, errors.New("database URL file is empty")
 		}
 	}
 	return cfg, nil

@@ -1,0 +1,46 @@
+# Local managed-node overlay. Supply private files under .local/; publish only loopback.
+services:
+  database:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: pulse_node
+      POSTGRES_DB: pulse_node
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets: [database_password]
+    volumes: ["node_database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pulse_node -d pulse_node"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    image: ${PULSE_NODE_IMAGE:-pulse-vpn-node:local}
+    command: [migrate]
+    environment:
+      PULSE_NODE_TOKEN_FILE: /run/secrets/node_api_token
+      PULSE_NODE_DATABASE_URL_FILE: /run/secrets/node_database_url
+    secrets: [node_api_token, node_database_url]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      database:
+        condition: service_healthy
+  node:
+    environment:
+      PULSE_NODE_VLESS_FILE: /run/secrets/node_vless
+      PULSE_NODE_DATABASE_URL_FILE: /run/secrets/node_database_url
+    secrets: [node_vless, node_database_url]
+    ports: ["127.0.0.1:${PULSE_NODE_VPN_PORT:-18443}:8443"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+secrets:
+  database_password:
+    file: ../.local/database-password
+  node_database_url:
+    file: ../.local/database-url
+  node_vless:
+    file: ../.local/vless.json
+volumes:
+  node_database:

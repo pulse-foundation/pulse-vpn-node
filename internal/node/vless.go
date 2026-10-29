@@ -38,8 +38,8 @@ func (v VLESS) Validate() error {
 	if net.ParseIP(v.Listen) == nil || v.Port < 1 || v.Port > 65535 {
 		return errors.New("VLESS requires an IP listen address and a valid port")
 	}
-	if len(v.Users) == 0 || len(v.Users) > 1024 {
-		return errors.New("VLESS requires 1 to 1024 users")
+	if len(v.Users) > 1024 {
+		return errors.New("VLESS supports at most 1024 users")
 	}
 	names, ids := map[string]bool{}, map[string]bool{}
 	for _, u := range v.Users {

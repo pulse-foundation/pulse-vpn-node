@@ -19,7 +19,6 @@ func TestVLESSValidation(t *testing.T) {
 		name   string
 		change func(*VLESS)
 	}{
-		{"no users", func(v *VLESS) { v.Users = nil }},
 		{"bad uuid", func(v *VLESS) { v.Users[0].UUID = "secret-bad-uuid" }},
 		{"duplicate uuid", func(v *VLESS) { v.Users = append(v.Users, User{Name: "other", UUID: strings.ToUpper(v.Users[0].UUID)}) }},
 		{"duplicate name", func(v *VLESS) {
@@ -48,5 +47,13 @@ func TestVLESSValidation(t *testing.T) {
 				t.Fatal("validation exposed secret")
 			}
 		})
+	}
+}
+
+func TestVLESSAllowsNoActiveUsers(t *testing.T) {
+	v := validVLESS()
+	v.Users = nil
+	if err := v.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

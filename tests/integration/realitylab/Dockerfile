@@ -1,7 +1,7 @@
 FROM golang:1.26-bookworm@sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb AS build
 WORKDIR /src
 ENV GOTOOLCHAIN=local GOPROXY=off
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY internal/node ./internal/node
 COPY tests/integration/realitylab ./tests/integration/realitylab
 RUN CGO_ENABLED=0 go build -trimpath -o /out/reality-lab ./tests/integration/realitylab

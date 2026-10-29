@@ -12,48 +12,72 @@ import (
 	"time"
 )
 
+type udpSession struct {
+	control net.Conn
+	conn    *net.UDPConn
+}
+
+func (s *udpSession) close() { s.conn.Close(); s.control.Close() }
 func udpEcho(proxy string) error {
+	session, err := openUDP(proxy)
+	if err != nil {
+		return err
+	}
+	defer session.close()
+	return session.echo()
+}
+func openUDP(proxy string) (_ *udpSession, resultErr error) {
 	control, err := net.DialTimeout("tcp", proxy, time.Second)
 	if err != nil {
-		return errors.New("SOCKS control unavailable")
+		return nil, errors.New("SOCKS control unavailable")
 	}
-	defer control.Close()
+	defer func() {
+		if resultErr != nil {
+			control.Close()
+		}
+	}()
 	_ = control.SetDeadline(time.Now().Add(8 * time.Second))
 	if _, err := control.Write([]byte{5, 1, 0}); err != nil {
-		return err
+		return nil, err
 	}
 	var greeting [2]byte
 	if _, err := io.ReadFull(control, greeting[:]); err != nil || greeting != [2]byte{5, 0} {
-		return errors.New("SOCKS greeting failed")
+		return nil, errors.New("SOCKS greeting failed")
 	}
 	if _, err := control.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
-		return err
+		return nil, err
 	}
 	var head [4]byte
 	if _, err := io.ReadFull(control, head[:]); err != nil || head[0] != 5 || head[1] != 0 {
-		return errors.New("SOCKS UDP associate failed")
+		return nil, errors.New("SOCKS UDP associate failed")
 	}
 	host, err := readAddress(control, head[3])
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var port [2]byte
 	if _, err := io.ReadFull(control, port[:]); err != nil {
-		return err
+		return nil, err
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
 		host, _, _ = net.SplitHostPort(proxy)
 	}
 	relay, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(port[:])))))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	conn, err := net.DialUDP("udp", nil, relay)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+
+	return &udpSession{control: control, conn: conn}, nil
+}
+func (s *udpSession) echo() error {
+	conn := s.conn
+	var head [4]byte
+	var port [2]byte
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 	payload := make([]byte, 256)
 	_, _ = rand.Read(payload)
 	// Mihomo resolves UDP destinations on the client. Docker deliberately does not

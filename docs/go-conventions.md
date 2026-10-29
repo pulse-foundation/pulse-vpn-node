@@ -1,7 +1,8 @@
 # Go conventions for Pulse VPN Node
 
-These are implementation defaults. The Go module and Docker verification target exist; migration
-tooling and CI are not implemented yet. Add runnable commands together with their implementation.
+These are implementation defaults. The Go module, Docker verification target and explicit SQL
+migration command are implemented; CI is not configured yet. Add runnable commands together with
+their implementation.
 
 ## Code and ownership
 

@@ -23,17 +23,24 @@ type Options struct {
 }
 
 type Process struct {
-	cmd          *exec.Cmd
-	done         chan struct{}
-	err          error // Written before done closes; read only after observing done.
-	configPath   string
-	controller   *Controller
-	probeAddress string
-	vpnPort      int
+	cmd               *exec.Cmd
+	done              chan struct{}
+	err               error // Written before done closes; read only after observing done.
+	configPath        string
+	controller        *Controller
+	probeAddress      string
+	vpnPort           int
+	binary            string
+	controllerAddress string
+	startupVLESS      *node.VLESS
+	operations        chan struct{} // A single writer, with context-aware acquisition.
+	lifetime          context.Context
+	cancel            context.CancelFunc
 }
 
 // Start uses ctx only for startup validation. The caller owns Stop for the child lifetime.
 func Start(ctx context.Context, o Options) (*Process, error) {
+	o.VLESS = copyVLESS(o.VLESS)
 	host, port, err := net.SplitHostPort(o.ControllerAddress)
 	n, portErr := strconv.Atoi(port)
 	ip := net.ParseIP(host)
@@ -100,7 +107,16 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, errors.New("cannot start core process")
 	}
-	p := &Process{cmd: cmd, done: make(chan struct{}), configPath: path, controller: NewController("http://"+o.ControllerAddress, secret), probeAddress: probeAddress}
+	// Startup/request cancellation never owns the serving child lifetime.
+	lifetime, lifetimeCancel := context.WithCancel(context.WithoutCancel(ctx))
+	p := &Process{
+		cmd: cmd, done: make(chan struct{}), configPath: path,
+		controller:   NewController("http://"+o.ControllerAddress, secret),
+		probeAddress: probeAddress, binary: o.Binary, controllerAddress: o.ControllerAddress,
+		startupVLESS: o.VLESS, operations: make(chan struct{}, 1),
+		lifetime: lifetime, cancel: lifetimeCancel,
+	}
+	p.operations <- struct{}{}
 	if o.VLESS != nil {
 		p.vpnPort = o.VLESS.Port
 	}
@@ -109,8 +125,12 @@ func Start(ctx context.Context, o Options) (*Process, error) {
 		if err := cmd.Wait(); err != nil {
 			p.err = errors.New("core process exited unsuccessfully")
 		}
+		p.cancel()
+		// Let cancelled operations release files before removing the runtime directory.
+		<-p.operations
 		_ = os.RemoveAll(dir)
 		close(p.done)
+		p.operations <- struct{}{}
 	}()
 	return p, nil
 }
@@ -119,6 +139,9 @@ func (p *Process) Done() <-chan struct{} { return p.done }
 func (p *Process) Err() error            { <-p.done; return p.err }
 
 func (p *Process) Version(ctx context.Context) (string, error) {
+	if p.lifetime.Err() != nil {
+		return "", errors.New("core process is stopped")
+	}
 	select {
 	case <-p.done:
 		return "", errors.New("core process is stopped")
@@ -148,6 +171,7 @@ func (p *Process) Ready(ctx context.Context) (string, error) {
 }
 
 func (p *Process) Stop(ctx context.Context) error {
+	p.cancel()
 	select {
 	case <-p.done:
 		return nil

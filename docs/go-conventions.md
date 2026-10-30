@@ -2,7 +2,7 @@
 
 These are implementation defaults. The Go module, Docker verification target and explicit SQL
 migration command are implemented. GitHub Actions runs the shared native amd64/arm64 checks on
-PRs, pushes and release publication; see the README. Add runnable commands together with their
+PRs, pushes to `main` and release publication; see the README. Add runnable commands together with their
 implementation.
 
 ## Code and ownership
@@ -43,8 +43,13 @@ implementation.
 Use table-driven tests when cases share behavior, `httptest` for HTTP, `t.TempDir` and `t.Cleanup`
 for isolation, and focused fakes only at real external boundaries. Use an actual disposable
 PostgreSQL for transaction/migration semantics and the pinned core for reload/connection behavior.
-Wait on conditions with deadlines rather than fixed sleeps. Test outcomes and failure recovery,
-not private helper calls or source-text patterns. Run subprocess failure tests without exposing secrets.
+Wait on conditions with deadlines rather than fixed sleeps. For in-process timer/concurrency tests,
+prefer standard `testing/synctest` with channels or `net.Pipe`; real sockets, Docker and child processes
+need observable readiness/completion and bounded real-time waits. Never assume a signal immediately
+terminates a child, or that a short timeout proves which network phase was reached. Register cleanup
+as soon as a resource starts, cancel owned work and join it before the test returns. A shared build
+failure must stop the integration suite instead of triggering another build in the next scenario.
+Test outcomes and failure recovery, not private helper calls or source-text patterns. Run subprocess failure tests without exposing secrets.
 
 The baseline is formatting, `go vet ./...`, `go test ./...`, and
 `go build ./cmd/pulse-vpn-node`. Run `go test -race ./...` for concurrency/lifecycle changes and in
@@ -67,5 +72,7 @@ change needs link/frontmatter/diff checks, not pretend application test results.
   the same boundary discipline applies when using native pgx APIs.
 - [Race detector](https://go.dev/doc/articles/race_detector): runtime race checking.
 - [Go security practices](https://go.dev/doc/security/best-practices): dependency checks and tooling.
+
+- [Testing Time](https://go.dev/blog/testing-time) and [testing/synctest](https://pkg.go.dev/testing/synctest): deterministic in-process concurrency and virtual-time tests.
 
 Consult these for language questions rather than adding copied style manuals to local skills.

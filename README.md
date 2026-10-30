@@ -126,7 +126,8 @@ database; changing `vless.json` does not reset managed users. Transport changes 
 
 The Go integration package uses the full node plus the single test overlay. It builds the images
 once, then runs sequential subtests: `Compose`, `Postgres`, `Lifecycle`, `Reality`, `Users`, `Traffic`
-and `Telemetry`. Each Docker scenario refuses stale resources and cleans up its own project via
+and `Telemetry`. A failed image preparation stops the suite without retrying in later scenarios. Each Docker scenario
+refuses stale resources and cleans up its own project via
 `t.Cleanup`, including failures. No persistent node settings are needed.
 
 ```sh
@@ -153,7 +154,7 @@ docker build --target check -t pulse-vpn-node-check:local .
 
 ## GitHub Actions and releases
 
-- PRs and pushes run the shared verification workflow on native Linux **amd64 and arm64** runners.
+- PRs and pushes to `main` run the shared verification workflow on native Linux **amd64 and arm64** runners.
 - Checks include the image build gates, Compose validation, real PostgreSQL transaction tests and
   all five VPN/lifecycle acceptance scenarios. Test projects must be clean before and after each run.
 - A **published GitHub Release** triggers the same checks, then publishes the verified image pair to

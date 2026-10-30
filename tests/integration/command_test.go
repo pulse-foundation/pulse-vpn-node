@@ -41,3 +41,34 @@ func TestCommandFailureDistinguishesTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildFailureStopsSuite(t *testing.T) {
+	realDocker, err := exec.LookPath("docker")
+	need(t, err == nil, "Docker is required to resolve Compose")
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	// Only configuration resolution reaches Docker; builds and runtime commands
+	// are intercepted so this regression cannot create containers or images.
+	script := `#!/bin/sh
+case " $* " in
+  *" config --format json "*) exec "$TEST_REAL_DOCKER" "$@" ;;
+  *" build "*) printf 'build\n' >> "$TEST_DOCKER_CALLS"; echo 'synthetic build failure' >&2; exit 1 ;;
+  *" ps -aq "*|*" network ls -q "*|*" volume ls -q "*) exit 0 ;;
+  *) printf 'unexpected command\n' >> "$TEST_DOCKER_CALLS"; exit 2 ;;
+esac
+`
+	need(t, os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0700) == nil, "cannot create Docker boundary fixture")
+	binary, err := os.Executable()
+	need(t, err == nil, "cannot locate test binary")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "-test.run=^TestNode$", "-test.v", "-test.timeout=25s")
+	cmd.Dir = newSuite(t).root
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "TEST_REAL_DOCKER="+realDocker, "TEST_DOCKER_CALLS="+calls)
+	output, err := cmd.CombinedOutput()
+	need(t, err != nil && ctx.Err() == nil, "build failure must fail promptly")
+	need(t, strings.Contains(string(output), "synthetic build failure"), "build diagnostics were lost")
+	data, err := os.ReadFile(calls)
+	need(t, err == nil && string(data) == "build\n", "failed build was retried or runtime commands were attempted")
+	need(t, !strings.Contains(string(output), "=== RUN   TestNode/Lifecycle"), "suite continued after failed preparation")
+}

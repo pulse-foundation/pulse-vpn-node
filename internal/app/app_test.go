@@ -23,19 +23,50 @@ func TestStartupCancellationReapsStartedChild(t *testing.T) {
 	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	err := Run(ctx, config.Config{Listen: "127.0.0.1:0", Token: strings.Repeat("x", 64), Binary: binary, RuntimeDir: filepath.Join(dir, "runtime")})
-	if err == nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var runErr error
+	go func() {
+		defer close(done)
+		runErr = Run(ctx, config.Config{Listen: "127.0.0.1:0", Token: strings.Repeat("x", 64), Binary: binary, RuntimeDir: filepath.Join(dir, "runtime")})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("startup did not join after cancellation")
+		}
+	})
+	// Observe the real child before cancelling; elapsed time is only a safety bound.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	var pid int
+	for pid == 0 {
+		if raw, err := os.ReadFile(pidFile); err == nil {
+			if value, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && value > 0 {
+				pid = value
+				break
+			}
+		}
+		select {
+		case <-done:
+			t.Fatal("startup exited before child readiness", runErr)
+		case <-deadline.C:
+			t.Fatal("child never signalled startup")
+		case <-ticker.C:
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("startup did not finish after cancellation")
+	}
+	if runErr == nil {
 		t.Fatal("reported ready without a controller")
-	}
-	raw, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatal("child never started", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatal(err)
 	}
 	if err := syscall.Kill(pid, 0); err == nil {
 		t.Fatal("orphan after startup cancellation")

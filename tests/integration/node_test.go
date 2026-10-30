@@ -14,7 +14,7 @@ func TestNode(t *testing.T) {
 		return
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
+		ok := t.Run(c.name, func(t *testing.T) {
 			l := s.start(t, c.project)
 			switch c.name {
 			case "Postgres":
@@ -28,6 +28,9 @@ func TestNode(t *testing.T) {
 				l.managed(t, c.name)
 			}
 		})
+		if !ok && !s.prepared {
+			return // Preparation is shared; retrying it in another scenario hides the first failure.
+		}
 	}
 }
 func (l *lab) exited(t *testing.T, id string) container {

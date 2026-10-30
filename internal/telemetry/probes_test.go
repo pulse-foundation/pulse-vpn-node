@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -161,19 +163,56 @@ func TestProbesHTTPSCancellationAndConcurrency(t *testing.T) {
 }
 
 func TestProbesHTTPSBodyDeadline(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	}))
-	defer server.Close()
-	p := NewProbes(ProbeOptions{Targets: []ProbeTarget{{Name: "slow", Type: "https", Address: server.URL}}, Timeout: 40 * time.Millisecond, Concurrency: 1})
-	trustProbeServer(p, server)
-	started := time.Now()
-	c := p.Sample(context.Background()).Checks[0]
-	if c.Status != "failed" || c.Reason != "timeout" || c.RTTMilliseconds != nil || time.Since(started) > time.Second {
-		t.Fatalf("body deadline: %+v", c)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
+		defer client.Close()
+		headersSent := make(chan struct{})
+		release := make(chan struct{})
+		defer close(release)
+		go func() {
+			request, err := http.ReadRequest(bufio.NewReader(server))
+			if err != nil {
+				t.Error("cannot read probe request", err)
+				return
+			}
+			defer request.Body.Close()
+			if _, err := io.WriteString(server, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n"); err != nil {
+				t.Error("cannot send probe headers", err)
+				return
+			}
+			close(headersSent)
+			<-release // Never finish the body, even when the request is cancelled.
+		}()
+		p := NewProbes(ProbeOptions{Targets: []ProbeTarget{{Name: "slow", Type: "https", Address: "https://probe.test/"}}, Timeout: time.Second, Concurrency: 1})
+		// Model an already established TLS connection so this tests the body only.
+		// Real certificate verification is covered by TestProbesHTTPSDirectBoundedAndVerified.
+		p.transport.DialTLSContext = func(context.Context, string, string) (net.Conn, error) { return client, nil }
+		done := make(chan Sample, 1)
+		go func() { done <- p.Sample(context.Background()) }()
+		synctest.Wait()
+		select {
+		case <-headersSent:
+		default:
+			t.Fatal("probe did not reach response body")
+		}
+		select {
+		case <-done:
+			t.Fatal("probe completed before body or deadline")
+		default:
+		}
+		time.Sleep(time.Second) // Advances virtual time, not wall-clock time.
+		synctest.Wait()
+		select {
+		case sample := <-done:
+			c := sample.Checks[0]
+			if c.Status != "failed" || c.Reason != "timeout" || c.RTTMilliseconds != nil {
+				t.Fatalf("body deadline: %+v", c)
+			}
+		default:
+			t.Fatal("body read ignored deadline")
+		}
+	})
 }
 
 func TestProbesDNSDirectAndCanceled(t *testing.T) {

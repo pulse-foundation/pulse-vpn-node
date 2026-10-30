@@ -8,7 +8,8 @@ over raw TCP with Vision. The agent validates settings, starts the pinned Mihomo
 authenticated readiness, and stops/reaps the child. Without a VPN file it starts idle and reports
 `vpnConfigured: false`. Optional PostgreSQL-backed user management supports live add/enable/disable.
 Managed nodes also persist approximate per-user traffic and expose it through the authenticated API.
-VPS telemetry and Pulse integration remain planned.
+VPS/container telemetry, configured network checks and a 15-minute RAM buffer are available.
+Pulse-side import and dashboards remain separate work.
 
 The agent lifecycle uses shared `node.Core` / `node.Runtime` contracts. Mihomo is the only implemented
 adapter; adding another core requires its adapter, wiring and packaging, without changing the HTTP
@@ -74,6 +75,10 @@ time and collection health. Collection runs independently of API reads. See [tra
 for the migration, approximation limits and local test: `python3 tests/integration/traffic_smoke.py`.
 
 ## Verify
+
+See [node telemetry](docs/telemetry.md) for resource visibility, cached statistics, configured
+connectivity checks and cursor-based catch-up. Run `python3 tests/integration/telemetry_smoke.py`
+for its isolated local acceptance test. No public target is probed by default.
 
 The isolated VPN test starts an agent-managed server and a separate Mihomo client, both v1.19.33,
 with fresh credentials and local HTTP/HTTPS/UDP targets. It publishes no host ports, uses no existing

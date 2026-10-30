@@ -29,6 +29,10 @@ func main() {
 		err = liveUsers()
 	case "users-persist":
 		err = persistedUsers()
+	case "telemetry-live":
+		err = liveTelemetry()
+	case "telemetry-persist":
+		err = persistedTelemetry()
 	case "probe":
 		err = probe()
 	case "reject-bad-uuid":
@@ -41,7 +45,7 @@ func main() {
 		err = fmt.Errorf("unknown fixture command")
 	}
 	if err != nil {
-		if os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
+		if os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
 			fmt.Println("FAIL: " + err.Error())
 		}
 		fmt.Fprintln(os.Stderr, err)

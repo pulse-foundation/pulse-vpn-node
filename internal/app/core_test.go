@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/pulse-foundation/pulse-vpn-node/internal/config"
@@ -49,11 +50,12 @@ func TestRunUsesIndependentCoreAndStopsIt(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			runtime := &testRuntime{done: make(chan struct{})}
+			var closeOnce sync.Once
 			runtime.ready = func(context.Context) (string, error) {
 				if strings.HasPrefix(scenario, "cancel") {
 					cancel()
 				} else {
-					close(runtime.done)
+					closeOnce.Do(func() { close(runtime.done) })
 				}
 				if strings.HasSuffix(scenario, "startup") {
 					return "", errors.New("not ready")

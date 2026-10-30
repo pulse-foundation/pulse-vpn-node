@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/telemetry"
 )
 
 type Status struct {
@@ -32,9 +33,22 @@ func NewWithUsers(token string, vpnConfigured bool, check func(context.Context) 
 }
 
 func NewWithTraffic(token string, vpnConfigured bool, check func(context.Context) (string, error), users *node.UserManager, traffic trafficReader) http.Handler {
+	return NewWithServices(token, vpnConfigured, check, Services{Users: users, Traffic: traffic})
+}
+
+type Services struct {
+	Users          *node.UserManager
+	Traffic        trafficReader
+	Telemetry      *telemetry.Buffer
+	SampleInterval time.Duration
+	ProbeInterval  time.Duration
+}
+
+func NewWithServices(token string, vpnConfigured bool, check func(context.Context) (string, error), services Services) http.Handler {
 	mux := http.NewServeMux()
-	userRoutes(mux, users)
-	trafficRoutes(mux, traffic)
+	userRoutes(mux, services.Users)
+	trafficRoutes(mux, services.Traffic)
+	telemetryRoutes(mux, services.Telemetry, services.SampleInterval, services.ProbeInterval)
 	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()

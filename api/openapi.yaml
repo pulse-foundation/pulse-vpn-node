@@ -6,6 +6,79 @@ info:
 security:
   - nodeToken: []
 paths:
+  /api/v1/system/stats:
+    get:
+      operationId: getSystemStats
+      summary: Read cached resource and runtime observations without I/O
+      responses:
+        '200':
+          description: Independent latest resource/runtime envelopes, including partial or unavailable data
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [system, runtime]
+                properties:
+                  system:
+                    $ref: '#/components/schemas/TelemetryLatest'
+                  runtime:
+                    $ref: '#/components/schemas/TelemetryLatest'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Telemetry service unavailable
+  /api/v1/connectivity:
+    get:
+      operationId: getConnectivity
+      summary: Read cached configured outbound checks; never initiates a probe
+      responses:
+        '200':
+          description: Latest direct node-egress observations, not VPN-path or inbound reachability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryLatest'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Telemetry service unavailable
+  /api/v1/telemetry/samples:
+    get:
+      operationId: getTelemetrySamples
+      summary: Read a non-destructive bounded page from the 15-minute RAM stream
+      parameters:
+        - in: query
+          name: runId
+          description: Agent-run ID; supply together with after, or omit both for first page
+          schema:
+            type: string
+            pattern: '^[a-fA-F0-9]{32}$'
+        - in: query
+          name: after
+          description: Decimal uint64 position exclusively after this sequence, paired with runId
+          schema:
+            type: string
+            pattern: '^[0-9]+$'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 128
+            default: 64
+      responses:
+        '200':
+          description: Coherent retained page with cursor, eviction gap and run-change indicators; payload at most 512 KiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryPage'
+        '400':
+          description: Malformed, unpaired or future cursor, invalid/duplicate/unknown query parameter
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Telemetry service unavailable
   /api/v1/traffic:
     get:
       operationId: getUserTraffic
@@ -144,6 +217,170 @@ components:
       type: http
       scheme: bearer
   schemas:
+    TelemetrySequence:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Unsigned 64-bit integer encoded as decimal string to preserve precision
+    TelemetryCursor:
+      type: object
+      required: [runId, after]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        after:
+          $ref: '#/components/schemas/TelemetrySequence'
+    TelemetryLatest:
+      type: object
+      required: [runId, sample, ageSeconds, stale]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        sample:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TelemetrySample'
+        ageSeconds:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Elapsed time since publication; sample has separate measurement timestamps
+        stale:
+          type: boolean
+          description: Missing sample or age exceeding three configured collection intervals
+    TelemetrySample:
+      type: object
+      required: [runId, sequence, kind, observedAt]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        sequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        kind:
+          type: string
+          enum: [system, runtime, connectivity]
+        observedAt:
+          type: string
+          format: date-time
+        metrics:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/TelemetryMetric'
+        checks:
+          type: array
+          maxItems: 32
+          description: Absent when no connectivity targets are configured
+          items:
+            $ref: '#/components/schemas/ConnectivityCheck'
+        runtime:
+          type: object
+          required: [coreState, userState]
+          properties:
+            coreState:
+              type: string
+              enum: [ready, degraded, unavailable]
+            coreVersion:
+              type: string
+            userState:
+              type: string
+              enum: [not_configured, pending, retrying, observed_empty, degraded]
+    TelemetryMetric:
+      type: object
+      required: [name, scope, unit, available, value, counter, observedAt]
+      properties:
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [host, container, process]
+        resource:
+          type: string
+          description: Explicit interface, device or filesystem name; never a raw path
+        unit:
+          type: string
+        available:
+          type: boolean
+        value:
+          type: number
+          nullable: true
+          description: Gauge value, null when unavailable or represented as an integer counter
+        counter:
+          type: string
+          pattern: '^[0-9]+$'
+          nullable: true
+        reason:
+          type: string
+          description: Safe unavailable reason code, never raw diagnostic text
+        observedAt:
+          type: string
+          format: date-time
+        windowSeconds:
+          type: number
+          minimum: 0
+    ConnectivityCheck:
+      type: object
+      required: [name, type, scope, vantage, status, observedAt, rttMilliseconds, lossPercent]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [dns, tcp, https, icmp]
+        scope:
+          type: string
+          enum: [container]
+        vantage:
+          type: string
+          enum: [node_direct]
+        status:
+          type: string
+          enum: [success, failed, unavailable]
+        reason:
+          type: string
+        observedAt:
+          type: string
+          format: date-time
+        rttMilliseconds:
+          type: number
+          minimum: 0
+          nullable: true
+        lossPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          nullable: true
+    TelemetryPage:
+      type: object
+      required: [runId, firstSequence, lastSequence, headSequence, records, nextCursor, gap, runChanged, hasMore]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        firstSequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        lastSequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        headSequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        records:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/TelemetrySample'
+        nextCursor:
+          $ref: '#/components/schemas/TelemetryCursor'
+        gap:
+          type: boolean
+          description: Requested observations were evicted; resume at earliest retained position
+        runChanged:
+          type: boolean
+          description: Cursor belongs to another agent run; restart from earliest retained data in this run
+        hasMore:
+          type: boolean
+          description: More retained records existed after this coherent page
     Traffic:
       type: object
       required: [approximate, pollIntervalSeconds, state, stale, observedAt, users, resetCount, skippedConnections]

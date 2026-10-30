@@ -60,6 +60,21 @@ func generate() error {
 			return err
 		}
 	}
+	if err := writeJSON("telemetry.json", map[string]any{
+		"sampleIntervalSeconds": 1, "probeIntervalSeconds": 5, "probeTimeoutMilliseconds": 1000,
+		"resources": map[string]any{"hostProc": "/host/proc", "filesystems": []any{
+			map[string]string{"name": "container-root", "path": "/", "scope": "container"},
+			map[string]string{"name": "missing-source", "path": "/missing-telemetry-source", "scope": "container"},
+		}},
+		"probes": map[string]any{"concurrency": 4, "targets": []any{
+			map[string]string{"name": "dns", "type": "dns", "address": "target"},
+			map[string]string{"name": "tcp", "type": "tcp", "address": "target:8443"},
+			map[string]string{"name": "https", "type": "https", "address": "https://target:8443/health"},
+			map[string]string{"name": "icmp", "type": "icmp", "address": "127.0.0.1"},
+		}},
+	}); err != nil {
+		return err
+	}
 	if err := generateCertificate(); err != nil {
 		return err
 	}

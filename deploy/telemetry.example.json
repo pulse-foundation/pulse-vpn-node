@@ -1,0 +1,14 @@
+{
+  "sampleIntervalSeconds": 5,
+  "probeIntervalSeconds": 30,
+  "probeTimeoutMilliseconds": 2000,
+  "resources": {
+    "hostProc": "/host/proc",
+    "cgroup": "/sys/fs/cgroup",
+    "hostInterfaces": [],
+    "containerInterfaces": ["eth0"],
+    "disks": [],
+    "filesystems": [{"name": "container-root", "path": "/", "scope": "container"}]
+  },
+  "probes": {"concurrency": 4, "targets": []}
+}

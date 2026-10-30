@@ -19,6 +19,16 @@ func run(ctx context.Context, cfg config.Config, adapter node.Core) error {
 }
 
 func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store node.UserStore) error {
+	agentStart := time.Now()
+	// Direct embedding callers may omit telemetry configuration; environment-based
+	// startup has already loaded and validated the explicit settings file.
+	if cfg.Telemetry.SampleIntervalSeconds == 0 {
+		cfg.Telemetry = config.DefaultTelemetry()
+	}
+	if err := cfg.Telemetry.Validate(); err != nil {
+		return err
+	}
+	cfg.Telemetry.Probes.Timeout = time.Duration(cfg.Telemetry.ProbeTimeoutMilliseconds) * time.Millisecond
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return errors.New("cannot bind management listener")
@@ -28,11 +38,18 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 	if err != nil {
 		return err
 	}
+	coreStart := time.Now()
+	var joinTelemetry func()
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := core.Stop(stopCtx); err != nil {
 			slog.Error("core shutdown failed", "error", err)
+		}
+		// Reap the serving child before joining OS observation workers: a broken
+		// kernel/filesystem must not make telemetry keep a VPN process alive.
+		if joinTelemetry != nil {
+			joinTelemetry()
 		}
 	}()
 	version, err := waitReady(ctx, core)
@@ -66,11 +83,17 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 			defer func() { cancelTraffic(); <-trafficDone }()
 		}
 	}
-	// Avoid a typed nil interface for the optional traffic endpoint.
-	handler := httpapi.NewWithUsers(cfg.Token, cfg.VLESS != nil, core.Ready, manager)
-	if collector != nil {
-		handler = httpapi.NewWithTraffic(cfg.Token, cfg.VLESS != nil, core.Ready, manager, collector)
+	buffer, stopTelemetry, err := startTelemetry(ctx, cfg.Telemetry, core, manager, store, agentStart, coreStart)
+	if err != nil {
+		return err
 	}
+	joinTelemetry = stopTelemetry
+	services := httpapi.Services{Users: manager, Telemetry: buffer, SampleInterval: time.Duration(cfg.Telemetry.SampleIntervalSeconds) * time.Second, ProbeInterval: time.Duration(cfg.Telemetry.ProbeIntervalSeconds) * time.Second}
+	// Avoid a typed nil interface for the optional traffic endpoint.
+	if collector != nil {
+		services.Traffic = collector
+	}
+	handler := httpapi.NewWithServices(cfg.Token, cfg.VLESS != nil, core.Ready, services)
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()

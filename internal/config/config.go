@@ -16,6 +16,7 @@ type Config struct {
 	RuntimeDir  string
 	DatabaseURL string
 	VLESS       *node.VLESS
+	Telemetry   Telemetry
 }
 
 func Load() (Config, error) {
@@ -42,6 +43,10 @@ func Load() (Config, error) {
 		}
 	}
 	cfg := Config{Listen: envDefault("PULSE_NODE_LISTEN", "127.0.0.1:8080"), Token: token, Binary: envDefault("PULSE_NODE_MIHOMO_BINARY", "/usr/local/bin/mihomo"), RuntimeDir: envDefault("PULSE_NODE_RUNTIME_DIR", "/run/pulse-node")}
+	cfg.Telemetry, err = loadTelemetry(os.Getenv("PULSE_NODE_TELEMETRY_FILE"))
+	if err != nil {
+		return Config{}, err
+	}
 	if _, _, err := net.SplitHostPort(cfg.Listen); err != nil {
 		return Config{}, errors.New("invalid PULSE_NODE_LISTEN address")
 	}

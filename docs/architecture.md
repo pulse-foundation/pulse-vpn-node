@@ -9,8 +9,9 @@ The current startup slice reads a bounded, validated JSON file through `internal
 passthrough. No file means idle; an invalid file fails startup. File edits require an explicit restart
 in startup-file mode. Optional PostgreSQL management now persists users, revisions and idempotent
 operations, and reconciles user changes through live reload. The file seeds users only once;
-transport changes still require restart. Managed nodes collect approximate traffic totals; VPS telemetry
-remains unimplemented. See [traffic accounting](traffic.md) for the implemented storage and API contract.
+transport changes still require restart. Managed nodes collect approximate traffic totals. Resource
+telemetry, configured network probes and a 15-minute RAM stream are implemented; Pulse ingestion is
+separate work. See [traffic accounting](traffic.md) and [telemetry](telemetry.md) for current contracts.
 See [local setup](local-reality.md) and [live users](live-users.md).
 
 ## Responsibilities and deployment
@@ -241,9 +242,9 @@ Three vantage points remain distinct:
 
 Latest-snapshot reads and buffered imports serve different needs. `GET /api/v1/system/stats` and
 `GET /api/v1/connectivity` return ready in-memory snapshots without waiting for new measurements or
-database access. A planned `GET /api/v1/telemetry/samples` endpoint returns retained records after a
-cursor in bounded pages. These routes use node authentication and are not implemented yet; define
-their exact OpenAPI schemas with implementation, including partial results and freshness.
+database access. `GET /api/v1/telemetry/samples` returns retained records after a cursor in bounded
+pages. These authenticated routes are implemented in `api/openapi.yaml`; see [telemetry](telemetry.md)
+for the precise fields, visibility limits and safe deployment configuration.
 
 Use one ordered telemetry stream for completed resource samples and probe results. Give every agent
 run a new unique ID and every appended record a strictly increasing sequence within that run.

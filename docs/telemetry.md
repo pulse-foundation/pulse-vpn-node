@@ -124,7 +124,7 @@ part of this node implementation.** The local test simulates retry/deduplication
 
 ## Local verification
 
-`python3 tests/integration/telemetry_smoke.py` builds an isolated Docker lab with real Linux metrics,
+`go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/Telemetry$'` builds an isolated Docker lab with real Linux metrics,
 pinned Mihomo, PostgreSQL and local DNS/TCP/verified-TLS targets. It tests authenticated cache reads,
 pagination/retry/dedup, explicit unavailable sources, continued collection during DB outage, unchanged
 VPN sessions/core identity and restarted-run cursors. No host test ports or public/VPS targets are used.

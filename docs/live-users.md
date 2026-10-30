@@ -9,7 +9,7 @@ tested for continuity, but a simultaneous new handshake may need to retry during
 ## Local acceptance
 
 ```sh
-python3 tests/integration/users_smoke.py
+go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/Users$'
 ```
 
 This builds fresh local containers, generates disposable credentials, and publishes no host ports.

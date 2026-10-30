@@ -69,7 +69,7 @@ jobs:
             staging="$IMAGE:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$arch"
             docker tag "$actual" "$staging"
             docker push "$staging"
-            digest=$(docker buildx imagetools inspect "$staging" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+            digest=$(docker buildx imagetools inspect "$staging" --format '{{.Manifest.Digest}}')
             [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
             digests+=("$IMAGE@$digest")
           done

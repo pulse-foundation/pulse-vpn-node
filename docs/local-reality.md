@@ -6,13 +6,13 @@ launch includes PostgreSQL-backed [live users](live-users.md); direct file-only 
 
 ## Reproducible connection test
 
-From the repository root, with Docker Compose and Python 3 available:
+From the repository root, with Docker Compose and Go 1.26.10 available:
 
 ```sh
-python3 tests/integration/reality_smoke.py
+go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/Reality$'
 ```
 
-The script builds the agent image and a separate test helper, creates fresh X25519 keys, UUIDs,
+The Go test builds the agent image and a separate test helper, creates fresh X25519 keys, UUIDs,
 short IDs and a local TLS certificate, and runs this path:
 
 ```text
@@ -31,7 +31,7 @@ Acceptance checks cover authenticated agent readiness, HTTP and certificate-veri
 public key must fail. An occupied VPN port must fail agent startup; stopping the node must prevent
 further transfers. The test helper and generated credentials are not shipped in the agent image.
 
-The script removes its own project and credential volume even on failure. If interrupted forcibly,
+The Go test removes its own project and credential volume even on failure. If interrupted forcibly,
 inspect and remove only this project before rerunning:
 
 ```sh

@@ -21,7 +21,8 @@ before the node starts. Users, traffic and telemetry do not require separate Com
 The agent retains its low-level idle/file-only modes, but these are not the standard launch path.
 
 Requires Docker with **Compose 2.24.4 or newer** (`!override` / `!reset` support).
-Go is not required on the host. Go 1.26.10, Mihomo v1.19.33 and image inputs are pinned;
+Running the node needs no host Go installation; integration tests require Go 1.26.10.
+Go 1.26.10, Mihomo v1.19.33 and image inputs are pinned;
 see [dependencies](docs/dependencies.md). Release automation is configured in GitHub Actions; no release image has been published as part
 of this setup. Until the first release, build locally or supply an image you have built via
 `PULSE_NODE_IMAGE`.
@@ -31,13 +32,13 @@ of this setup. Until the first release, build locally or supply an image you hav
 From the repository root:
 
 ```sh
-python3 tests/integration/reality_smoke.py
+go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/Reality$'
 ```
 
 This builds the full node and a real Mihomo client, generates fresh credentials and a local TLS
 target, verifies HTTP/HTTPS/UDP and rejects invalid credentials, then removes its own containers,
 volumes and networks. It publishes no host ports and does not read `.local/`, use an existing VPN
-profile or contact public targets. Python 3 is required for test runners.
+profile or contact public targets. The coordinator uses only standard Go `testing` and `os/exec`.
 
 ## Configure a persistent node
 
@@ -58,25 +59,21 @@ For a new local installation, generate the token and matching database files onc
 preserves existing files and prints no secrets:
 
 ```sh
-python3 - <<'PYSETUP'
-from pathlib import Path
-from secrets import token_hex
-from urllib.parse import quote
-
-root = Path('.local')
-root.mkdir(mode=0o700, exist_ok=True)
-root.chmod(0o700)
-for name in ('api-token', 'database-password'):
-    path = root / name
-    if not path.exists():
-        path.write_text(token_hex(32))
-        path.chmod(0o644)
-dsn = root / 'database-url'
-if not dsn.exists():
-    password = quote((root / 'database-password').read_text().strip(), safe='')
-    dsn.write_text(f'postgres://pulse_node:{password}@database:5432/pulse_node?sslmode=disable')
-    dsn.chmod(0o644)
-PYSETUP
+(
+  set -eu
+  umask 077
+  mkdir -p .local
+  chmod 700 .local
+  test -f .local/api-token || openssl rand -hex 32 > .local/api-token
+  test -f .local/database-password || openssl rand -hex 32 > .local/database-password
+  if ! test -f .local/database-url; then
+    # Percent-encode the password bytes without printing credentials.
+    password=$(cat .local/database-password)
+    encoded=$(printf '%s' "$password" | od -An -v -tx1 | tr -d ' \n' | sed 's/../%&/g')
+    printf 'postgres://pulse_node:%s@database:5432/pulse_node?sslmode=disable' "$encoded" > .local/database-url
+  fi
+  chmod 644 .local/api-token .local/database-password .local/database-url
+)
 ```
 
 Keep the directory mode **0700**. Files mounted as Compose secrets must be readable by container
@@ -127,17 +124,22 @@ database; changing `vless.json` does not reset managed users. Transport changes 
 
 ## Verify
 
-All acceptance scripts use the same full node plus the single test overlay. Each owns a separate
-project and cleans up only its disposable resources. They do not require persistent node settings.
+The Go integration package uses the full node plus the single test overlay. It builds the images
+once, then runs sequential subtests: `Compose`, `Postgres`, `Lifecycle`, `Reality`, `Users`, `Traffic`
+and `Telemetry`. Each Docker scenario refuses stale resources and cleans up its own project via
+`t.Cleanup`, including failures. No persistent node settings are needed.
 
 ```sh
-python3 tests/integration/compose_check.py
-python3 tests/integration/docker_smoke.py
-python3 tests/integration/reality_smoke.py
-python3 tests/integration/users_smoke.py
-python3 tests/integration/traffic_smoke.py
-python3 tests/integration/telemetry_smoke.py
+go test -tags=integration -count=1 -timeout=30m -v ./tests/integration
 ```
+
+For a single scenario, add `-run '^TestNode/Reality$'` (or another subtest name). `Compose` only
+resolves configuration and does not start containers. Ordinary `go test ./...` excludes these
+Docker tests; `-count=1` prevents cached acceptance results. To deliberately test previously built
+images without rebuilding, append `-args -images-prebuilt`; all three lab images must already exist.
+The default, including CI, builds from the current checkout and checks the resulting image ID
+throughout the test run. A regression test also verifies that unsafe Compose configuration stops
+both full and individually selected scenarios before runtime preparation.
 
 These cover effective Compose isolation, authentication/lifecycle, real VPN traffic, live user
 changes with existing sessions, database outages, persistent traffic totals and telemetry catch-up.
@@ -153,7 +155,7 @@ docker build --target check -t pulse-vpn-node-check:local .
 
 - PRs and pushes run the shared verification workflow on native Linux **amd64 and arm64** runners.
 - Checks include the image build gates, Compose validation, real PostgreSQL transaction tests and
-  all five acceptance suites. Test projects must be clean before and after each run.
+  all five VPN/lifecycle acceptance scenarios. Test projects must be clean before and after each run.
 - A **published GitHub Release** triggers the same checks, then publishes the verified image pair to
   `ghcr.io/pulse-foundation/pulse-vpn-node:<release-tag>`. Release tags must look like `v0.1.0` or
   `v0.1.0-rc.1`; prereleases are supported. There is no automatic `latest` tag.
@@ -173,7 +175,7 @@ token or production/SSH credentials are needed by these workflows. See [GitHub's
 To run the same verification locally on the Docker daemon's native architecture:
 
 ```sh
-python3 tests/integration/ci.py
+go test -tags=integration -count=1 -timeout=30m -v ./tests/integration
 ```
 
 This command never publishes an image. It checks that the runtime image ID remains unchanged across

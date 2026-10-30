@@ -50,6 +50,9 @@ The baseline is formatting, `go vet ./...`, `go test ./...`, and
 `go build ./cmd/pulse-vpn-node`. Run `go test -race ./...` for concurrency/lifecycle changes and in
 supported CI; provision its toolchain requirements rather than silently skipping it. Integration
 tests must have an explicit documented command and clean up only their own resources.
+The Docker coordinator lives in `tests/integration/*_test.go`, uses the `integration` build tag,
+standard `testing`/`os/exec`, and bounded commands with `t.Cleanup`. Keep orchestration in Go; do not
+add Python runners or a second test framework.
 
 Pin and configure Staticcheck and `govulncheck` when quality tooling is added. Avoid piling on several
 overlapping linters or recording commands as implemented before scripts/CI actually exist. Use the

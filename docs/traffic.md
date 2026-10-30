@@ -77,7 +77,7 @@ memory buffer are a separate subsystem and are not implemented by this collector
 ## Local acceptance
 
 ```sh
-python3 tests/integration/traffic_smoke.py
+go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/Traffic$'
 ```
 
 The disposable lab uses PostgreSQL and pinned Mihomo server/clients on internal Docker networks,

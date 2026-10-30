@@ -25,6 +25,11 @@ Follow the checkout and current user request. Keep documentation-only work free 
   Keep a bounded 15-minute in-memory telemetry buffer for catch-up; do not persist it to disk or SQL.
   Durable VPN traffic totals/checkpoints remain local; they are distinct from monitoring history.
 - A change to one user's access must not routinely restart the core or disconnect other users.
+- For transport evolution, follow [single-connection rules](docs/connections-and-access.md): one
+  VLESS connection per Node, typed transport selected at creation and inherited by all accesses.
+  Conversion is explicit revisioned maintenance with rollback; preserve identities, credentials
+  where compatible, revocations and totals. Do not add parallel listeners or per-user transports.
+  The design is not evidence of implemented XHTTP or conversion APIs.
 - A local change does not authorize production deployment, probing live VPSs, or publishing releases.
 
 ## Read only the relevant guidance

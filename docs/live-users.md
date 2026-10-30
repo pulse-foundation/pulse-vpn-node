@@ -90,3 +90,17 @@ terminal `REJECT`; revoked identities cannot recreate working outbound flows aft
 configured REALITY handshake target alone uses explicit `proxy: DIRECT`. Hidden parent connections
 may remain physically open; this is access denial, not proof of transport drain. Transport and quota APIs are absent. Approximate traffic totals are available through
 `GET /api/v1/traffic`; see [traffic accounting](traffic.md).
+
+## Public connection descriptor
+
+`GET /api/v1/connection` uses the same bearer authentication and `Cache-Control: no-store`
+as the other management routes. It returns `{"schemaVersion":1,"connection":null}` when no
+startup VPN settings exist. Otherwise `connection` contains `protocol: "vless"`,
+`transport: {"type":"raw","flow":"xtls-rprx-vision"}`, the internal `listenPort`, and
+`reality: {"publicKey": "…", "shortIds": ["…"], "serverNames": ["…"]}`.
+The public key is derived with Go X25519 from validated startup material, encoded as unpadded
+base64url. Private keys, user identities/UUIDs and REALITY destination are never included.
+The snapshot stays stable across live user reconciliation; it describes configuration rather
+than health or external reachability. Pulse must supply the public node address and any port
+mapping. Invalid embedded startup settings fail closed with a generic 503; normal startup
+configuration loading already rejects invalid settings. See `api/openapi.yaml` for the contract.

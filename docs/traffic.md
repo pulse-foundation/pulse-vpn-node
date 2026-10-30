@@ -51,8 +51,11 @@ and counts new connections from zero. The current lifecycle does not adopt an ex
 Starting a new collector against an unverified existing process is unsupported. One node process owns
 each database; this is not multi-agent leader election.
 
-The immutable user key is currently `node_users.name`. Disabled identities and their totals remain;
-renaming, hard deletion and key reuse are unsupported. Unknown/empty attribution is skipped rather than
+The stable accounting key is `node_users.name`. Disabled identities retain their totals; deleted
+identities remain hidden accounting tombstones. Credential generation runtime names map back to this
+key, so rotation and late revoked sessions preserve totals. Recreating a deleted name with a fresh
+UUID preserves history; retired UUIDs cannot be reused. Renaming and hard deletion are unsupported.
+Unknown/empty attribution is skipped rather than
 assigned to another user. A newer observation whose counter decreases adds zero in that direction and
 replaces that checkpoint; a changed connection start time rebaselines both directions. `resetCount`
 records these events. Integer overflow rejects the whole sample instead of wrapping totals.

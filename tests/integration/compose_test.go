@@ -121,7 +121,7 @@ func (s *suite) checkCompose(t *testing.T) {
 		need(t, len(svc.Ports) == 0 && len(svc.Secrets) == 0, "lab exposes ports or developer secrets")
 		need(t, svc.NetworkMode == "" || svc.NetworkMode == "none", "unexpected lab network mode")
 	}
-	for name, want := range map[string]string{"target": "back", "client": "default", "second": "default", "probe": "default", "bad-key": "default", "bad-uuid": "default"} {
+	for name, want := range map[string]string{"target": "back", "client": "default", "second": "default", "probe": "default", "bad-key": "default", "bad-uuid": "default", "replacement": "default", "configure": "default"} {
 		svc, ok := lab.Services[name]
 		need(t, ok, "missing lab service: "+name)
 		_, ok = svc.Networks[want]

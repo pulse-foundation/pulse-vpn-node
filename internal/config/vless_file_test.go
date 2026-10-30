@@ -17,7 +17,7 @@ func TestVLESSFileStrictParsing(t *testing.T) {
 		{"valid", syntheticVLESS, true},
 		{"unknown field", strings.Replace(syntheticVLESS, `"port":8443`, `"port":8443,"allowInsecure":true`, 1), false},
 		{"extra document", syntheticVLESS + `{}`, false},
-		{"null", `null`, false},
+		{"null", `null`, true},
 		{"invalid", strings.Replace(syntheticVLESS, `"abcd"`, `"secret-invalid"`, 1), false},
 		{"oversized", syntheticVLESS + strings.Repeat(" ", 65537), false},
 	} {
@@ -30,12 +30,20 @@ func TestVLESSFileStrictParsing(t *testing.T) {
 			if (err == nil) != tc.ok {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tc.ok && (v == nil || v.Port != 8443) {
+			if tc.ok && tc.name != "null" && (v == nil || v.Port != 8443) {
 				t.Fatal("settings not loaded")
 			}
 			if err != nil && strings.Contains(err.Error(), "secret-invalid") {
 				t.Fatal("error leaks credentials")
 			}
 		})
+	}
+}
+
+func TestIdleRejectsTrailingJSON(t *testing.T) {
+	for _, raw := range []string{"null {}", "null null"} {
+		if _, err := ParseVLESS([]byte(raw)); err == nil {
+			t.Fatal("idle document accepted trailing JSON")
+		}
 	}
 }

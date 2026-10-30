@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
 )
@@ -97,4 +98,84 @@ func TestConnectionAbsentOrInvalid(t *testing.T) {
 			}
 		})
 	}
+}
+
+type managedAPIStore struct{ apiUsers }
+
+func (s *managedAPIStore) InitializeManaged(ctx context.Context, _ *node.VLESS) (node.UserSnapshot, error) {
+	return s.Snapshot(ctx)
+}
+func (s *managedAPIStore) CreateConnection(_ context.Context, c node.ConnectionChange) (node.Operation, error) {
+	if _, err := c.NewSettings(); err != nil {
+		return node.Operation{}, err
+	}
+	return node.Operation{Revision: 2, State: "queued"}, nil
+}
+
+type managedAPIRuntime struct{}
+
+func (*managedAPIRuntime) ApplyUsers(context.Context, []node.User) error       { return nil }
+func (*managedAPIRuntime) SweepRevoked(context.Context, []string) (int, error) { return 0, nil }
+func (*managedAPIRuntime) ApplyState(context.Context, *node.VLESS) error       { return nil }
+func (*managedAPIRuntime) ReservedPorts() []int                                { return []int{19090} }
+
+func TestManagedIdleConnectionAPI(t *testing.T) {
+	manager := node.NewUserManager(&managedAPIStore{}, &managedAPIRuntime{}, 18080)
+	handler := NewWithServices("token", false, func(context.Context) (string, error) { return "version", nil }, Services{Users: manager})
+	for _, tc := range []struct {
+		method, path, body string
+		code               int
+	}{
+		{"GET", "/api/v1/status", "", 200},
+		{"GET", "/api/v1/connection", "", 200},
+		{"PUT", "/api/v1/connection", `{"expectedRevision":1,"transport":{"type":"raw"},"listenPort":8443,"reality":{"destination":"target.test:443","serverNames":["target.test"]}}`, 202},
+		{"PUT", "/api/v1/connection", `{"expectedRevision":1,"transport":{"type":"raw"},"listenPort":18080,"reality":{"destination":"target.test:443","serverNames":["target.test"]}}`, 400},
+		{"PUT", "/api/v1/connection", `{"expectedRevision":1,"transport":{"type":"raw"},"listenPort":19090,"reality":{"destination":"target.test:443","serverNames":["target.test"]}}`, 400},
+		{"PUT", "/api/v1/connection", `{"expectedRevision":1,"transport":{"type":"xhttp"},"listenPort":8443,"reality":{"destination":"target.test:443","serverNames":["target.test"]}}`, 400},
+		{"PUT", "/api/v1/connection", `{"expectedRevision":1,"privateKey":"never-accept"}`, 400},
+		{"PUT", "/api/v1/connection", `null`, 400},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Idempotency-Key", "create")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, req)
+		if out.Code != tc.code {
+			t.Fatalf("%s %s got %d want %d", tc.method, tc.path, out.Code, tc.code)
+		}
+		if tc.path == "/api/v1/status" {
+			var status Status
+			if json.Unmarshal(out.Body.Bytes(), &status) != nil || status.Status != "ready" || status.VPNConfigured || !status.Capabilities.ConnectionCreate || !status.Capabilities.UserDelete || !status.Capabilities.UserRotate {
+				t.Fatal("idle status or managed capabilities incorrect")
+			}
+		}
+	}
+}
+
+type unavailableManagedStore struct{ managedAPIStore }
+
+func (s *unavailableManagedStore) Snapshot(context.Context) (node.UserSnapshot, error) {
+	return node.UserSnapshot{}, node.ErrUnavailable
+}
+func TestDatabaseOutageDoesNotFalsifyHealthyCoreReadiness(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		manager := node.NewUserManager(&unavailableManagedStore{}, nil)
+		go manager.Run(ctx)
+		synctest.Wait()
+		if manager.Status().Error == "" {
+			t.Fatal("fixture did not observe unavailable desired state")
+		}
+		handler := NewWithServices("token", false, func(context.Context) (string, error) { return "version", nil }, Services{Users: manager})
+		req := httptest.NewRequest("GET", "/api/v1/status", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, req)
+		if out.Code != 200 {
+			t.Fatal("database control outage made a healthy core unready")
+		}
+		cancel()
+		synctest.Wait()
+	})
 }

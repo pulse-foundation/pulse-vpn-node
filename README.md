@@ -49,10 +49,10 @@ Prepare a private directory, `.local/` by default (override with `PULSE_NODE_CON
 | `api-token` | Random management bearer token, at least 32 characters |
 | `database-password` | PostgreSQL password |
 | `database-url` | Matching URL for user/database `pulse_node` at `database:5432` |
-| `vless.json` | REALITY transport and initial users; listen on `0.0.0.0:8443` |
+| `vless.json` | JSON `null` for managed idle startup, or legacy REALITY transport and initial users |
 
-The image includes a noninteractive initializer. Build the local image first (or select a released
-image that includes `init`):
+The image includes a noninteractive initializer. Build the local image from this checkout first;
+a published image must include managed idle support before using this workflow:
 
 ```sh
 docker compose -f compose.yaml -f compose.dev.yaml build node
@@ -61,20 +61,20 @@ install -d -m 700 .local
 docker run --rm --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true --user "$(id -u):$(id -g)" \
   --mount type=bind,src="$PWD/.local",dst=/config \
-  "$PULSE_NODE_IMAGE" init --config-dir /config \
-  --reality-destination YOUR_TLS_TARGET:443 \
-  --reality-server-names YOUR_TLS_NAME
+  "$PULSE_NODE_IMAGE" init --config-dir /config --idle
 ```
 
-Replace the target and SNI with your selected REALITY destination. Init validates their syntax;
-it does not contact the target or check its TLS compatibility. It generates an API token,
-a matching PostgreSQL credential pair, an X25519 private key and a short ID. The default container
-listener is `0.0.0.0:8443`; `--listen` and `--port` can select another listener, but Compose's
-container port mapping must match. Host port overrides alone do not require changing this listener.
+The managed node starts healthy with `vpnConfigured: false` and no public VPN listener. Create its
+single raw VLESS/REALITY connection through `PUT /api/v1/connection`, then add users through the
+[managed API](docs/live-users.md). The default Compose mapping expects internal port 8443. Keys and
+short IDs are generated once and persisted in PostgreSQL when the connection is created. Init does
+not contact a REALITY target or validate its TLS compatibility.
 
-Initial users are empty: add them through the authenticated [users API](docs/live-users.md).
-See the [VLESS settings contract](docs/local-reality.md#startup-settings) for the generated file.
-Client-profile export is separate work.
+Standalone preconfigured initialization remains available with `--reality-destination HOST:PORT`
+and `--reality-server-names NAME,...` instead of `--idle`. It generates the transport in `vless.json`;
+managed startup imports this material once without changing keys, users or disabled state. SQL is
+subsequently authoritative. `--listen` and `--port` select its initial listener; Compose's container
+port mapping must match. See the [VLESS settings contract](docs/local-reality.md#startup-settings).
 
 Repeat the same command without transport flags to check and fill missing files. Existing valid
 files, keys, users and permissions stay byte-for-byte unchanged. Explicit transport flags must match

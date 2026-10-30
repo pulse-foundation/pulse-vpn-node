@@ -351,3 +351,33 @@ func TestInitPreservesExistingUsersAndCustomTransport(t *testing.T) {
 	}
 	assertUnchanged(t, o.Dir, before)
 }
+
+func TestIdleInitIsRepeatableAndPreservesConfiguredSecrets(t *testing.T) {
+	o := Options{Dir: filepath.Join(t.TempDir(), "idle"), Idle: true}
+	if _, err := Init(o); err != nil {
+		t.Fatal(err)
+	}
+	before := readFiles(t, o.Dir)
+	if string(before["vless.json"]) != "null\n" {
+		t.Fatal("idle init generated a listener")
+	}
+	if _, err := Init(o); err != nil {
+		t.Fatal(err)
+	}
+	assertUnchanged(t, o.Dir, before)
+	conflict := o
+	conflict.Destination = "target.test:443"
+	if _, err := Init(conflict); err == nil {
+		t.Fatal("idle init accepted transport")
+	}
+	assertUnchanged(t, o.Dir, before)
+	configured := fresh(t)
+	if _, err := Init(configured); err != nil {
+		t.Fatal(err)
+	}
+	previous := readFiles(t, configured.Dir)
+	if _, err := Init(Options{Dir: configured.Dir, Idle: true}); err != nil {
+		t.Fatal(err)
+	}
+	assertUnchanged(t, configured.Dir, previous)
+}

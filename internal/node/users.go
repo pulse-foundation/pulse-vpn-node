@@ -20,37 +20,52 @@ type UserRuntime interface {
 }
 
 type ManagedUser struct {
-	Name    string `json:"name"`
-	UUID    string `json:"-"`
-	Enabled bool   `json:"enabled"`
+	Name               string `json:"name"`
+	RuntimeName        string `json:"-"`
+	CredentialRevision int64  `json:"credentialRevision"`
+	UUID               string `json:"-"`
+	Enabled            bool   `json:"enabled"`
 }
 type UserSnapshot struct {
-	Revision int64
-	Users    []ManagedUser
+	Revision     int64
+	Users        []ManagedUser
+	Connection   *VLESS
+	Managed      bool
+	RevokedNames []string
 }
 
 func (s UserSnapshot) Active() []User {
 	users := []User{}
 	for _, u := range s.Users {
 		if u.Enabled {
-			users = append(users, User{Name: u.Name, UUID: u.UUID})
+			name := u.RuntimeName
+			if name == "" {
+				name = u.Name
+			}
+			users = append(users, User{Name: name, UUID: u.UUID})
 		}
 	}
 	return users
 }
 func (s UserSnapshot) Revoked() []string {
-	names := []string{}
+	names := append([]string{}, s.RevokedNames...)
 	for _, u := range s.Users {
 		if !u.Enabled {
-			names = append(names, u.Name)
+			name := u.RuntimeName
+			if name == "" {
+				name = u.Name
+			}
+			names = append(names, name)
 		}
 	}
 	return names
 }
 
-// Change uses an immutable name/UUID identity. UUID is required for creation and
-// omitted for enable/disable; existing UUIDs may never be replaced or reused.
+// UserChange keeps a stable accounting name. UUID is required for creation or
+// explicit rotation, omitted for enable/disable and deletion. Retired UUIDs are
+// never reused; rotation preserves enabled state and accounting.
 type UserChange struct {
+	Kind             string // empty/update, delete, or rotate
 	Key              string
 	Name             string
 	UUID             string
@@ -71,4 +86,18 @@ type UserStore interface {
 	Change(context.Context, UserChange) (Operation, error)
 	Operation(context.Context, int64) (Operation, error)
 	RecordApply(context.Context, int64, string) error
+}
+
+// ManagedStore extends the same revision stream with its singleton listener.
+// InitializeManaged imports a legacy startup file once, never overwriting SQL state.
+type ManagedStore interface {
+	UserStore
+	InitializeManaged(context.Context, *VLESS) (UserSnapshot, error)
+	CreateConnection(context.Context, ConnectionChange) (Operation, error)
+}
+type ManagedRuntime interface {
+	// ReservedPorts identifies runtime-owned TCP ports that a listener must not use.
+	// This admission check is independent of whether a VPN listener is already active.
+	ReservedPorts() []int
+	ApplyState(context.Context, *VLESS) error
 }

@@ -34,6 +34,12 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 		return errors.New("cannot bind management listener")
 	}
 	defer listener.Close()
+	if _, managed := store.(node.ManagedStore); managed {
+		// Start the control plane independently of unverified desired settings.
+		// The single reconciler retries durable intent, including failed creation,
+		// without making a bind failure fatal to management after restart.
+		cfg.VLESS = nil
+	}
 	core, err := adapter.Start(ctx, cfg.VLESS)
 	if err != nil {
 		return err
@@ -63,7 +69,12 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 		if !ok {
 			return errors.New("selected core does not support live users")
 		}
-		manager = node.NewUserManager(store, users)
+		if _, managed := store.(node.ManagedStore); managed {
+			if _, ok := core.(node.ManagedRuntime); !ok {
+				return errors.New("selected core does not support managed connection snapshots")
+			}
+		}
+		manager = node.NewUserManager(store, users, listener.Addr().(*net.TCPAddr).Port)
 		workerCtx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		go func() { defer close(done); manager.Run(workerCtx) }()

@@ -82,7 +82,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	// The explicit order is the reviewed schema history. Reject gaps, unknown
 	// versions and changed checksums before applying any pending migration.
-	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql"}
+	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql"}
 	rows, err := tx.Query(ctx, "SELECT version,checksum FROM node_schema_migrations ORDER BY version")
 	if err != nil {
 		return node.ErrUnavailable
@@ -153,20 +153,45 @@ func lockState(ctx context.Context, tx pgx.Tx) (int64, bool, error) {
 }
 func snapshot(ctx context.Context, tx pgx.Tx, revision int64) (node.UserSnapshot, error) {
 	result := node.UserSnapshot{Revision: revision, Users: []node.ManagedUser{}}
-	rows, err := tx.Query(ctx, "SELECT name,uuid::text,enabled FROM node_users ORDER BY name LIMIT $1", maxUsers+1)
+	var settings []byte
+	if err := tx.QueryRow(ctx, "SELECT connection_initialized,connection_settings FROM node_user_state WHERE singleton").Scan(&result.Managed, &settings); err != nil {
+		return result, node.ErrUnavailable
+	}
+	if settings != nil {
+		if json.Unmarshal(settings, &result.Connection) != nil || result.Connection == nil || result.Connection.Validate() != nil {
+			return result, node.ErrUnavailable
+		}
+	}
+	rows, err := tx.Query(ctx, "SELECT u.name,u.uuid::text,u.enabled,u.credential_revision,c.runtime_name FROM node_users u JOIN node_user_credentials c ON c.uuid=u.uuid WHERE NOT u.deleted ORDER BY u.name LIMIT $1", maxUsers+1)
 	if err != nil {
 		return node.UserSnapshot{}, node.ErrUnavailable
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var u node.ManagedUser
-		if err := rows.Scan(&u.Name, &u.UUID, &u.Enabled); err != nil {
+		if err := rows.Scan(&u.Name, &u.UUID, &u.Enabled, &u.CredentialRevision, &u.RuntimeName); err != nil {
 			return node.UserSnapshot{}, node.ErrUnavailable
 		}
 		result.Users = append(result.Users, u)
 	}
 	if rows.Err() != nil || len(result.Users) > maxUsers {
 		return node.UserSnapshot{}, node.ErrUnavailable
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, "SELECT runtime_name FROM node_user_credentials WHERE revoked ORDER BY runtime_name")
+	if err != nil {
+		return result, node.ErrUnavailable
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if rows.Scan(&name) != nil {
+			return result, node.ErrUnavailable
+		}
+		result.RevokedNames = append(result.RevokedNames, name)
+	}
+	if rows.Err() != nil {
+		return result, node.ErrUnavailable
 	}
 	return result, nil
 }
@@ -204,6 +229,9 @@ func (s *Store) Initialize(ctx context.Context, seed []node.User) (node.UserSnap
 			if _, err = tx.Exec(ctx, "INSERT INTO node_users(name,uuid,enabled) VALUES($1,$2,true)", u.Name, u.UUID); err != nil {
 				return node.UserSnapshot{}, sanitized(err)
 			}
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO node_user_credentials(uuid,user_name,runtime_name) SELECT uuid,name,name FROM node_users ON CONFLICT(uuid) DO NOTHING"); err != nil {
+			return node.UserSnapshot{}, sanitized(err)
 		}
 		revision = 1
 		if _, err = tx.Exec(ctx, "UPDATE node_user_state SET initialized=true,revision=1 WHERE singleton"); err != nil {
@@ -247,7 +275,7 @@ func (s *Store) Snapshot(ctx context.Context) (node.UserSnapshot, error) {
 }
 
 func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, error) {
-	if !keyPattern.MatchString(c.Key) || !namePattern.MatchString(c.Name) || c.ExpectedRevision < 0 || (c.UUID != "" && !validUUID(c.UUID)) {
+	if !keyPattern.MatchString(c.Key) || !namePattern.MatchString(c.Name) || c.ExpectedRevision < 0 || (c.UUID != "" && !validUUID(c.UUID)) || (c.Kind != "" && c.Kind != "delete" && c.Kind != "rotate") || (c.Kind == "delete" && c.UUID != "") || (c.Kind == "rotate" && c.UUID == "") {
 		return node.Operation{}, node.ErrInvalid
 	}
 	// Explicit fields make the durable hash independent of future domain fields.
@@ -258,6 +286,9 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 	}{c.Name, c.UUID, c.Enabled, c.ExpectedRevision})
 	if err != nil {
 		return node.Operation{}, node.ErrInvalid
+	}
+	if c.Kind != "" {
+		body = append([]byte(c.Kind+":"), body...)
 	}
 	hash := sha256.Sum256(body)
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
@@ -286,35 +317,22 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 	if c.ExpectedRevision != revision {
 		return node.Operation{}, node.ErrConflict
 	}
-	var identity string
-	err = tx.QueryRow(ctx, "SELECT uuid::text FROM node_users WHERE name=$1", c.Name).Scan(&identity)
-	switch {
-	case err == nil:
-		if c.UUID != "" {
-			return node.Operation{}, node.ErrConflict
-		}
-		_, err = tx.Exec(ctx, "UPDATE node_users SET enabled=$2 WHERE name=$1", c.Name, c.Enabled)
-	case errors.Is(err, pgx.ErrNoRows):
-		if c.UUID == "" {
-			return node.Operation{}, node.ErrInvalid
-		}
-		var count int
-		if err = tx.QueryRow(ctx, "SELECT count(*) FROM node_users").Scan(&count); err != nil {
-			return node.Operation{}, node.ErrUnavailable
-		}
-		if count >= maxUsers {
-			return node.Operation{}, node.ErrInvalid
-		}
-		_, err = tx.Exec(ctx, "INSERT INTO node_users(name,uuid,enabled) VALUES($1,$2,$3)", c.Name, c.UUID, c.Enabled)
-	default:
+
+	// A user intent cannot be verified applied without a connection. Idle nodes
+	// expose reads/revisions so callers can create the singleton first.
+	var idle bool
+	if err = tx.QueryRow(ctx, "SELECT connection_initialized AND connection_settings IS NULL FROM node_user_state WHERE singleton").Scan(&idle); err != nil {
 		return node.Operation{}, node.ErrUnavailable
 	}
-	if err != nil {
-		return node.Operation{}, sanitized(err)
+	if idle {
+		return node.Operation{}, node.ErrConflict
 	}
-	// Overflow is an unavailable store, never a wrapped revision.
+	// Overflow is an unavailable store, never a wrapped credential revision.
 	if revision == int64(1<<63-1) {
 		return node.Operation{}, node.ErrUnavailable
+	}
+	if err = changeUser(ctx, tx, c, revision+1); err != nil {
+		return node.Operation{}, err
 	}
 	revision++
 	if _, err = tx.Exec(ctx, "UPDATE node_user_state SET revision=$1 WHERE singleton", revision); err != nil {

@@ -14,9 +14,16 @@ import (
 )
 
 type Status struct {
-	Status        string     `json:"status"`
-	VPNConfigured bool       `json:"vpnConfigured"`
-	Core          CoreStatus `json:"core"`
+	Capabilities  Capabilities `json:"capabilities"`
+	Status        string       `json:"status"`
+	VPNConfigured bool         `json:"vpnConfigured"`
+	Core          CoreStatus   `json:"core"`
+}
+
+type Capabilities struct {
+	ConnectionCreate bool `json:"connectionCreate"`
+	UserDelete       bool `json:"userDelete"`
+	UserRotate       bool `json:"userRotate"`
 }
 
 type CoreStatus struct {
@@ -47,7 +54,7 @@ type Services struct {
 
 func NewWithServices(token string, vpnConfigured bool, check func(context.Context) (string, error), services Services) http.Handler {
 	mux := http.NewServeMux()
-	connectionRoutes(mux, services.StartupVLESS)
+	connectionRoutes(mux, services.StartupVLESS, services.Users)
 	userRoutes(mux, services.Users)
 	trafficRoutes(mux, services.Traffic)
 	telemetryRoutes(mux, services.Telemetry, services.SampleInterval, services.ProbeInterval)
@@ -55,11 +62,19 @@ func NewWithServices(token string, vpnConfigured bool, check func(context.Contex
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
 		version, err := check(ctx)
-		status := Status{Status: "ready", VPNConfigured: vpnConfigured, Core: CoreStatus{Version: version}}
+		configured := vpnConfigured
+		managed := services.Users != nil && services.Users.Managed()
+		if managed {
+			configured = services.Users.Connection() != nil
+		}
+		status := Status{Status: "ready", VPNConfigured: configured, Core: CoreStatus{Version: version}}
 		code := http.StatusOK
 		if err != nil {
-			status = Status{Status: "degraded", VPNConfigured: vpnConfigured}
+			status = Status{Status: "degraded", VPNConfigured: configured}
 			code = http.StatusServiceUnavailable
+		}
+		if managed {
+			status.Capabilities = Capabilities{true, true, true}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)

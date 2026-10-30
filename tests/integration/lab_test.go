@@ -22,8 +22,11 @@ const nodeImage = "pulse-vpn-node:integration-test"
 var prebuilt = flag.Bool("images-prebuilt", false, "require existing node, helper and check images instead of building")
 var cases = []struct{ name, project string }{
 	{"Init", "pulse-vpn-node-init-test"},
+	{"InitIdle", "pulse-vpn-node-idle-init-test"},
 	{"Postgres", "pulse-vpn-node-storage-test"},
 	{"Lifecycle", "pulse-vpn-node-smoke"},
+	{"ManagedLifecycle", "pulse-vpn-node-managed-lifecycle"},
+	{"ManagedRecovery", "pulse-vpn-node-managed-recovery"},
 	{"Reality", "pulse-vpn-node-reality-test"},
 	{"Users", "pulse-vpn-node-users-test"},
 	{"Traffic", "pulse-vpn-node-traffic-test"},
@@ -67,7 +70,8 @@ type suite struct {
 }
 type lab struct {
 	*suite
-	project string
+	project      string
+	extraCompose string
 }
 
 func need(t *testing.T, ok bool, message string) {
@@ -132,6 +136,9 @@ func (s *suite) docker(t *testing.T, args ...string) string {
 }
 func (l *lab) args(args ...string) []string {
 	base := []string{"compose", "--env-file", "/dev/null", "-p", l.project, "-f", "compose.yaml", "-f", "tests/integration/compose.yaml"}
+	if l.extraCompose != "" {
+		base = append(base, "-f", l.extraCompose)
+	}
 	return append(base, args...)
 }
 func (l *lab) compose(t *testing.T, args ...string) string {
@@ -164,7 +171,7 @@ func (s *suite) prepare(t *testing.T) {
 	if *prebuilt {
 		s.docker(t, "image", "inspect", nodeImage, "pulse-vpn-node-reality-lab:local", "pulse-vpn-node:checks")
 	} else {
-		l := &lab{s, "pulse-vpn-node-storage-test"}
+		l := &lab{suite: s, project: "pulse-vpn-node-storage-test"}
 		r := s.run(20*time.Minute, l.args("--profile", "test", "--progress", "plain", "build", "node", "generate", "postgres-check")...)
 		if r.err != nil {
 			// Build contexts exclude operator secrets; runtime fixtures do not exist yet.
@@ -179,7 +186,7 @@ func (s *suite) start(t *testing.T, project string) *lab {
 	t.Helper()
 	s.prepare(t)
 	s.clean(t, project)
-	l := &lab{s, project}
+	l := &lab{suite: s, project: project}
 	t.Cleanup(func() {
 		// Cleanup has its own deadline: the test context may already be cancelled.
 		r := s.run(3*time.Minute, l.args("--profile", "test", "down", "--volumes", "--remove-orphans")...)

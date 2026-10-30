@@ -86,6 +86,36 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 	if sample.Sequence <= sequence {
 		return nil
 	}
+	// Resolve every credential generation, including revoked/deleted sessions,
+	// to its stable accounting identity before checkpoint lookup and pruning.
+	aliases, err := tx.Query(ctx, "SELECT runtime_name,user_name FROM node_user_credentials WHERE runtime_name=ANY($1)", users)
+	if err != nil {
+		return node.ErrUnavailable
+	}
+	attribution := map[string]string{}
+	for aliases.Next() {
+		var runtimeName, name string
+		if aliases.Scan(&runtimeName, &name) != nil {
+			aliases.Close()
+			return node.ErrUnavailable
+		}
+		attribution[runtimeName] = name
+	}
+	aliases.Close()
+	if aliases.Err() != nil {
+		return node.ErrUnavailable
+	}
+	connections := append([]traffic.Connection(nil), sample.Connections...)
+	for i := range connections {
+		if name, ok := attribution[connections[i].User]; ok {
+			connections[i].User = name
+			users[i] = name
+		} else {
+			connections[i].User = ""
+			users[i] = ""
+		}
+	}
+	sample.Connections = connections
 	// Prune only absent connections. The monotonic watermark makes a forgotten
 	// old connection ineligible for first-observation accounting if it reappears.
 	cutoff := sample.ObservedAt.Add(-traffic.CheckpointRetention).Truncate(time.Microsecond)
@@ -121,7 +151,7 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 	if rows.Err() != nil {
 		return node.ErrUnavailable
 	}
-	rows, err = tx.Query(ctx, "SELECT name FROM node_users ORDER BY name LIMIT $1", maxUsers+1)
+	rows, err = tx.Query(ctx, "SELECT name FROM node_users WHERE name=ANY($1)", users)
 	if err != nil {
 		return node.ErrUnavailable
 	}
@@ -135,7 +165,7 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 		known[user] = true
 	}
 	rows.Close()
-	if rows.Err() != nil || len(known) > maxUsers {
+	if rows.Err() != nil {
 		return node.ErrUnavailable
 	}
 	increments := make(map[string]trafficIncrement)
@@ -224,7 +254,7 @@ func (s *Store) TrafficTotals(ctx context.Context) (traffic.Totals, error) {
 	if err = tx.QueryRow(ctx, `SELECT observed_at,reset_count,skipped_connections FROM node_traffic_state WHERE singleton`).Scan(&result.ObservedAt, &result.ResetCount, &result.SkippedConnections); err != nil {
 		return traffic.Totals{}, node.ErrUnavailable
 	}
-	rows, err := tx.Query(ctx, `SELECT u.name,u.enabled,COALESCE(t.upload_bytes,0),COALESCE(t.download_bytes,0) FROM node_users u LEFT JOIN node_traffic_totals t ON t.user_name=u.name ORDER BY u.name LIMIT $1`, maxUsers+1)
+	rows, err := tx.Query(ctx, `SELECT u.name,u.enabled,COALESCE(t.upload_bytes,0),COALESCE(t.download_bytes,0) FROM node_users u LEFT JOIN node_traffic_totals t ON t.user_name=u.name WHERE NOT u.deleted ORDER BY u.name LIMIT $1`, maxUsers+1)
 	if err != nil {
 		return traffic.Totals{}, node.ErrUnavailable
 	}

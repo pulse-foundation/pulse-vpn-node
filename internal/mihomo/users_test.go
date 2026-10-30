@@ -374,3 +374,29 @@ func TestApplyUsersRejectsInvalidUsersBeforeReload(t *testing.T) {
 		t.Fatal("invalid users sent to core")
 	}
 }
+
+func TestApplyStateOccupiedPortPreservesVerifiedRuntime(t *testing.T) {
+	var calls atomic.Int32
+	p, vpn, _ := liveProcess(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(204) })
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	candidate := copyVLESS(vpn)
+	candidate.Port = occupied.Addr().(*net.TCPAddr).Port
+	before, err := os.ReadFile(p.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.ApplyState(context.Background(), candidate); err == nil {
+		t.Fatal("foreign occupied listener accepted")
+	}
+	after, err := os.ReadFile(p.configPath)
+	if err != nil || string(after) != string(before) || calls.Load() != 0 {
+		t.Fatal("occupied-port failure changed runtime")
+	}
+	if _, err = p.Ready(context.Background()); err != nil {
+		t.Fatal("occupied-port failure broke verified listener")
+	}
+}

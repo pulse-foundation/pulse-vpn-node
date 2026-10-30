@@ -6,10 +6,13 @@ User requirements take precedence.
 
 The current startup slice reads a bounded, validated JSON file through `internal/config` into the
 `internal/node` model; `internal/mihomo` renders it for the pinned core. There is no raw core-config
-passthrough. No file means idle; an invalid file fails startup. File edits require an explicit restart
-in startup-file mode. Optional PostgreSQL management now persists users, revisions and idempotent
-operations, and reconciles user changes through live reload. The file seeds users only once;
-transport changes still require restart. Managed nodes collect approximate traffic totals. Resource
+passthrough. No file or JSON `null` means idle; an invalid file fails startup. File edits require an explicit restart
+in startup-file mode. Optional PostgreSQL management persists the singleton connection, users, revisions and idempotent
+operations. One reconciler applies coherent connection/user snapshots through live reload. The file
+seeds users and the connection only once; managed SQL state is authoritative thereafter. Managed
+startup starts the core idle and reconciles SQL intent, so a failed listener creation cannot prevent
+the management API from starting. Reserved management/controller ports are rejected before persistence. First
+connection creation is supported from idle; transport conversion is unsupported. Managed nodes collect approximate traffic totals. Resource
 telemetry, configured network probes and a 15-minute RAM stream are implemented; Pulse ingestion is
 separate work. See [traffic accounting](traffic.md) and [telemetry](telemetry.md) for current contracts.
 See [local setup](local-reality.md) and [live users](live-users.md).
@@ -50,7 +53,7 @@ client-address requirements justify it. Run with the least privileges needed for
 
 `pulse-vpn-node init` prepares the four external files consumed by the main Compose:
 `api-token`, `database-password`, `database-url`, and `vless.json`. Pulse chooses the
-image, REALITY destination/SNI and port mapping; its provisioning worker will invoke this command.
+image and port mapping; `init --idle` defers REALITY creation to the authenticated API.
 That Pulse integration is separate work. Init only touches its configuration directory: no Docker socket, service startup, database
 connections, migrations, DNS requests or TLS probes.
 
@@ -224,9 +227,10 @@ Approximate accounting may lose observations during outages; do not trade that a
 counting already committed traffic.
 
 The current implementation polls every two seconds after each attempt and stores totals plus
-checkpoints in migration `002_traffic.sql`. User `name` is currently an immutable, non-reusable key;
-renaming and hard deletion are unsupported. A future display name must not replace this attribution
-key. A fresh cryptographically random generation is allocated only after starting a new owned child.
+checkpoints in migration `002_traffic.sql`. User `name` is a stable accounting key. Deleted users are hidden tombstones; recreating the same
+name requires a fresh credential and retains totals. Rotation changes an internal credential runtime
+identity, whose historical mappings remain attributable and revoked. A display name must not replace
+this attribution key. A fresh cryptographically random generation is allocated only after starting a new owned child.
 No orphan adoption or agent-only continuation is implemented. Snapshot sequence orders observations
 within that generation. See [traffic accounting](traffic.md) for pruning, reset and capacity semantics.
 

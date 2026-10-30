@@ -11,6 +11,7 @@ import (
 )
 
 const initUsage = `Usage: pulse-vpn-node init [options]
+  --idle                          Initialize managed node without a VPN listener
   --config-dir DIR                 Private configuration directory (default .local)
   --reality-destination HOST:PORT  Required when creating vless.json
   --reality-server-names NAME,...  Required when creating vless.json
@@ -25,6 +26,7 @@ func runInit(args []string, out io.Writer) error {
 	flags.SetOutput(io.Discard)
 	o := bootstrap.Options{}
 	names := ""
+	flags.BoolVar(&o.Idle, "idle", false, "")
 	flags.StringVar(&o.Dir, "config-dir", ".local", "")
 	flags.StringVar(&o.Destination, "reality-destination", "", "")
 	flags.StringVar(&names, "reality-server-names", "", "")

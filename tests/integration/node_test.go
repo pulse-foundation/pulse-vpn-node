@@ -15,8 +15,8 @@ func TestNode(t *testing.T) {
 	}
 	for _, c := range cases {
 		ok := t.Run(c.name, func(t *testing.T) {
-			if c.name == "Init" {
-				s.initialize(t, c.project)
+			if c.name == "Init" || c.name == "InitIdle" {
+				s.initialize(t, c.project, c.name == "InitIdle")
 				return
 			}
 			l := s.start(t, c.project)
@@ -26,6 +26,10 @@ func TestNode(t *testing.T) {
 				l.compose(t, "run", "--rm", "--no-deps", "postgres-check")
 			case "Lifecycle":
 				l.lifecycle(t)
+			case "ManagedRecovery":
+				l.managedRecovery(t)
+			case "ManagedLifecycle":
+				l.managedLifecycle(t)
 			case "Reality":
 				l.reality(t)
 			default:
@@ -61,12 +65,9 @@ func (l *lab) lifecycle(t *testing.T) {
 		r := l.run(15*time.Second, l.args(append(args, "http://127.0.0.1:8080/api/v1/status")...)...)
 		need(t, r.expectedFailure("401 Unauthorized"), "unauthorized API request was not rejected")
 	}
-	status := decode[struct {
-		Status        string
-		VPNConfigured bool
-		Core          struct{ Version string }
-	}](t, l.compose(t, "exec", "-T", "node", "pulse-vpn-node", "status"))
-	need(t, status.Status == "ready" && status.VPNConfigured && status.Core.Version == "v1.19.33", "unexpected authenticated status/core version")
+	waitNodeConfigured(t, func() string {
+		return l.compose(t, "exec", "-T", "node", "pulse-vpn-node", "status")
+	}, true)
 	l.compose(t, "exec", "-T", "node", "sh", "-c", `kill -KILL "$(pidof mihomo)"`)
 	need(t, l.exited(t, id).State.ExitCode != 0, "core crash did not fail agent")
 	l.compose(t, "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "45", "node")
@@ -84,7 +85,7 @@ func (l *lab) reality(t *testing.T) {
 	for _, name := range []string{"probe", "reject-bad-uuid", "reject-bad-key"} {
 		l.probe(t, name)
 	}
-	failed := l.run(30*time.Second, l.args("run", "--rm", "--no-deps", "--entrypoint", "/bin/sh", "node", "-c", `nc -l -p 8443 >/dev/null 2>&1 & while ! netstat -ltn | grep -q ":8443 "; do sleep 0.05; done; exec /usr/local/bin/pulse-vpn-node`)...)
+	failed := l.run(30*time.Second, l.args("run", "--rm", "--no-deps", "-e", "PULSE_NODE_DATABASE_URL_FILE=", "--entrypoint", "/bin/sh", "node", "-c", `nc -l -p 8443 >/dev/null 2>&1 & while ! netstat -ltn | grep -q ":8443 "; do sleep 0.05; done; exec /usr/local/bin/pulse-vpn-node`)...)
 	need(t, failed.expectedFailure("VLESS listen address is unavailable"), "occupied listener port did not fail startup")
 	l.compose(t, "stop", "node")
 	l.probe(t, "reject-stopped-node")
@@ -106,4 +107,58 @@ func (l *lab) managed(t *testing.T, kind string) {
 	l.restart(t)
 	l.probe(t, probe+"-persist")
 	t.Log("unchanged core across live operations and persistent state after restart verified")
+}
+
+func (l *lab) managedLifecycle(t *testing.T) {
+	l.up(t, "target", "database")
+	l.compose(t, "run", "--rm", "--no-deps", "generate", "managed-idle")
+	l.compose(t, "run", "--rm", "--no-deps", "migrate")
+	l.compose(t, "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait", "node")
+	identity := l.coreIdentity(t)
+	l.managedProbe(t, "managed-configure", true)
+	need(t, l.coreIdentity(t) == identity, "creating connection restarted core")
+	l.compose(t, "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait", "client", "second", "bad-uuid", "replacement")
+	l.managedProbe(t, "managed-lifecycle", false)
+	need(t, l.coreIdentity(t) == identity, "rotation or deletion restarted core")
+	l.restart(t)
+	l.managedProbe(t, "managed-persist", false)
+	t.Log("PASS: idle installation, singleton live create, credential lifecycle, unchanged core and durable restart verified")
+}
+
+func (l *lab) managedProbe(t *testing.T, name string, writable bool) {
+	t.Helper()
+	args := []string{"run", "--rm", "--no-deps", "-T", "-e", "REALITY_TEST_TARGET_IP=" + l.targetIP(t)}
+	service := "probe"
+	if writable {
+		service = "configure"
+	}
+	args = append(args, service, name)
+	r := l.run(3*time.Minute, l.args(args...)...)
+	logProbe(t, r.stdout)
+	for _, line := range strings.Split(r.stdout, "\n") {
+		if strings.HasPrefix(line, "FAIL: ") {
+			t.Fatal(line)
+		}
+	}
+	need(t, r.err == nil, "managed probe failed (diagnostics withheld)")
+}
+
+// Management readiness deliberately precedes verified VPN application in managed mode.
+func waitNodeConfigured(t *testing.T, read func() string, configured bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		status := decode[struct {
+			Status        string
+			VPNConfigured bool
+			Core          struct{ Version string }
+		}](t, read())
+		if status.Status == "ready" && status.VPNConfigured == configured && status.Core.Version == "v1.19.33" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("node did not reach expected verified VPN state")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }

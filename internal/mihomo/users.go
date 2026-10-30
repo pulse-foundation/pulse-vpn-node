@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
@@ -48,16 +50,57 @@ func (p *Process) operation(ctx context.Context) (context.Context, func(), error
 // Failed or ambiguous reloads must be retried with current desired state: restoring
 // the previous artifact could re-enable revoked credentials.
 func (p *Process) ApplyUsers(ctx context.Context, users []node.User) error {
+	p.stateMu.RLock()
+	candidate := copyVLESS(p.startupVLESS)
+	p.stateMu.RUnlock()
+	if candidate == nil {
+		return errors.New("live users require a configured VLESS listener")
+	}
+	candidate.Users = append([]node.User(nil), users...)
+	return p.ApplyState(ctx, candidate)
+}
+
+// ReservedPorts reports the controller port owned by this runtime. Keep this
+// detail in the adapter rather than duplicating it in API or persistence policy.
+func (p *Process) ReservedPorts() []int {
+	_, port, _ := net.SplitHostPort(p.controllerAddress)
+	n, _ := strconv.Atoi(port)
+	return []int{n}
+}
+
+// ApplyState is the single mutation path for both the listener and all users.
+// Candidate verification uses candidate settings, never the previous listener.
+func (p *Process) ApplyState(ctx context.Context, candidate *node.VLESS) error {
 	ctx, release, err := p.operation(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
-	if p.startupVLESS == nil {
-		return errors.New("live users require a configured VLESS listener")
+	candidate = copyVLESS(candidate)
+	p.stateMu.RLock()
+	previous := copyVLESS(p.startupVLESS)
+	uncertain := p.uncertain
+	p.stateMu.RUnlock()
+	if candidate != nil {
+		if candidate.Validate() != nil {
+			return errors.New("invalid live configuration")
+		}
+		_, controllerPort, _ := net.SplitHostPort(p.controllerAddress)
+		if strconv.Itoa(candidate.Port) == controllerPort {
+			return errors.New("VLESS port conflicts with core controller")
+		}
+		if previous == nil || previous.Address() != candidate.Address() {
+			// An earlier ambiguous controller reply may have bound the candidate already.
+			// Only accept that case if this child demonstrably owns the port.
+			if !uncertain || ownsListener(ctx, p.cmd.Process.Pid, candidate.Port) != nil {
+				listener, err := net.Listen("tcp", candidate.Address())
+				if err != nil {
+					return errors.New("VLESS listen address is unavailable")
+				}
+				_ = listener.Close()
+			}
+		}
 	}
-	candidate := copyVLESS(p.startupVLESS)
-	candidate.Users = append([]node.User(nil), users...)
 	data, err := render(p.controllerAddress, p.controller.secret, candidate)
 	if err != nil {
 		return errors.New("invalid live user configuration")
@@ -81,10 +124,13 @@ func (p *Process) ApplyUsers(ctx context.Context, users []node.User) error {
 	if _, err := p.Version(ctx); err != nil {
 		return err
 	}
+	p.stateMu.Lock()
+	p.uncertain = true
+	p.stateMu.Unlock()
 	if err := p.controller.Apply(ctx, data); err != nil {
 		return err
 	}
-	if _, err := p.Ready(ctx); err != nil {
+	if _, err := p.readySettings(ctx, candidate); err != nil {
 		return errors.New("core reload postconditions failed")
 	}
 	if ctx.Err() != nil || p.lifetime.Err() != nil {
@@ -93,6 +139,10 @@ func (p *Process) ApplyUsers(ctx context.Context, users []node.User) error {
 	if err := os.Rename(path, p.configPath); err != nil {
 		return errors.New("cannot retain verified core configuration")
 	}
+	p.stateMu.Lock()
+	p.startupVLESS = copyVLESS(candidate)
+	p.uncertain = false
+	p.stateMu.Unlock()
 	return nil
 }
 
@@ -108,3 +158,5 @@ func (p *Process) SweepRevoked(ctx context.Context, names []string) (int, error)
 }
 
 var _ node.UserRuntime = (*Process)(nil)
+
+var _ node.ManagedRuntime = (*Process)(nil)

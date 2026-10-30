@@ -64,3 +64,26 @@ func TestUserRoutesAuthenticateBoundInputsAndOmitCredentials(t *testing.T) {
 		t.Fatal("invalid or unauthorized requests reached store")
 	}
 }
+
+func TestUserLifecycleRoutes(t *testing.T) {
+	manager := node.NewUserManager(&apiUsers{}, nil)
+	handler := NewWithUsers("token", true, func(context.Context) (string, error) { return "version", nil }, manager)
+	for _, tc := range []struct {
+		method, path, body string
+		code               int
+	}{
+		{"DELETE", "/api/v1/users/user", `{"expectedRevision":1}`, 202},
+		{"POST", "/api/v1/users/user/rotate", `{"expectedRevision":1,"uuid":"f47ac10b-58cc-4372-a567-0e02b2c3d479"}`, 202},
+		{"POST", "/api/v1/users/user/rotate", `{"expectedRevision":1}`, 400},
+		{"DELETE", "/api/v1/users/user", `{"expectedRevision":1,"uuid":"secret"}`, 400},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Idempotency-Key", "lifecycle")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, req)
+		if out.Code != tc.code {
+			t.Errorf("%s: got %d, want %d", tc.path, out.Code, tc.code)
+		}
+	}
+}

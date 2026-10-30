@@ -17,6 +17,20 @@ func main() {
 	switch os.Args[1] {
 	case "generate":
 		err = generate()
+	case "managed-idle":
+		err = writeFile("server.json", []byte("null\n"))
+	case "managed-create-failure":
+		err = managedCreateFailure()
+	case "managed-still-failed":
+		err = managedCreationResult(false)
+	case "managed-recovered":
+		err = managedCreationResult(true)
+	case "managed-configure":
+		err = managedConfigure()
+	case "managed-lifecycle":
+		err = managedLifecycle()
+	case "managed-persist":
+		err = managedPersist()
 	case "target":
 		err = serveTarget()
 	case "target-health":
@@ -45,7 +59,7 @@ func main() {
 		err = fmt.Errorf("unknown fixture command")
 	}
 	if err != nil {
-		if os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
+		if os.Args[1] == "managed-create-failure" || os.Args[1] == "managed-still-failed" || os.Args[1] == "managed-recovered" || os.Args[1] == "managed-configure" || os.Args[1] == "managed-lifecycle" || os.Args[1] == "managed-persist" || os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
 			fmt.Println("FAIL: " + err.Error())
 		}
 		fmt.Fprintln(os.Stderr, err)

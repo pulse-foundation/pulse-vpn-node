@@ -117,7 +117,9 @@ func (l *lab) managedLifecycle(t *testing.T) {
 	identity := l.coreIdentity(t)
 	l.managedProbe(t, "managed-configure", true)
 	need(t, l.coreIdentity(t) == identity, "creating connection restarted core")
-	l.compose(t, "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait", "client", "second", "bad-uuid", "replacement")
+	// Building the node caches Mihomo in BuildKit, not necessarily in the daemon
+	// image store. Fresh CI runners must pull the pinned client image on first use.
+	l.compose(t, "up", "-d", "--no-deps", "--no-build", "--pull", "missing", "--wait", "client", "second", "bad-uuid", "replacement")
 	l.managedProbe(t, "managed-lifecycle", false)
 	need(t, l.coreIdentity(t) == identity, "rotation or deletion restarted core")
 	l.restart(t)

@@ -7,7 +7,8 @@ remains a separate project. This repository is GPLv3.
 over raw TCP with Vision. The agent validates settings, starts the pinned Mihomo child, serves
 authenticated readiness, and stops/reaps the child. Without a VPN file it starts idle and reports
 `vpnConfigured: false`. Optional PostgreSQL-backed user management supports live add/enable/disable.
-Traffic accounting, telemetry and Pulse integration remain planned.
+Managed nodes also persist approximate per-user traffic and expose it through the authenticated API.
+VPS telemetry and Pulse integration remain planned.
 
 The agent lifecycle uses shared `node.Core` / `node.Runtime` contracts. Mihomo is the only implemented
 adapter; adding another core requires its adapter, wiring and packaging, without changing the HTTP
@@ -65,6 +66,12 @@ docker compose -f deploy/compose.yaml down
 
 See [live user management](docs/live-users.md) for the PostgreSQL overlay, API, idempotency and
 reconciliation behavior. Run its disposable local test with `python3 tests/integration/users_smoke.py`.
+
+## Traffic statistics
+
+`GET /api/v1/traffic` returns durable upload/download byte totals per user, the last saved observation
+time and collection health. Collection runs independently of API reads. See [traffic accounting](docs/traffic.md)
+for the migration, approximation limits and local test: `python3 tests/integration/traffic_smoke.py`.
 
 ## Verify
 

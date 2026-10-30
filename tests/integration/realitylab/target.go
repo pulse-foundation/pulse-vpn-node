@@ -14,7 +14,7 @@ func serveTarget() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.HandleFunc("POST /echo", func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(w, http.MaxBytesReader(w, r.Body, 2<<20)) })
-	failures := make(chan error, 4)
+	failures := make(chan error, 6)
 	go func() {
 		s := &http.Server{Addr: ":8443", Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}
 		failures <- s.ListenAndServeTLS(filepath.Join(fixtureDir, "target.crt"), filepath.Join(fixtureDir, "target.key"))
@@ -63,6 +63,8 @@ func serveTarget() error {
 			}()
 		}
 	}()
+	go func() { failures <- serveTrafficTCP() }()
+	go func() { failures <- serveTrafficUDP() }()
 	<-failures
 	return errors.New("local target stopped")
 }

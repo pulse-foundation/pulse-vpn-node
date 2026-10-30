@@ -21,6 +21,10 @@ func main() {
 		err = serveTarget()
 	case "target-health":
 		err = targetHealth()
+	case "traffic-live":
+		err = liveTraffic()
+	case "traffic-persist":
+		err = persistedTraffic()
 	case "users-live":
 		err = liveUsers()
 	case "users-persist":
@@ -37,7 +41,7 @@ func main() {
 		err = fmt.Errorf("unknown fixture command")
 	}
 	if err != nil {
-		if os.Args[1] == "users-live" || os.Args[1] == "users-persist" {
+		if os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
 			fmt.Println("FAIL: " + err.Error())
 		}
 		fmt.Fprintln(os.Stderr, err)

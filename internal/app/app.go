@@ -11,6 +11,7 @@ import (
 	"github.com/pulse-foundation/pulse-vpn-node/internal/config"
 	"github.com/pulse-foundation/pulse-vpn-node/internal/httpapi"
 	"github.com/pulse-foundation/pulse-vpn-node/internal/node"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/traffic"
 )
 
 func run(ctx context.Context, cfg config.Config, adapter node.Core) error {
@@ -39,6 +40,7 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 		return err
 	}
 	var manager *node.UserManager
+	var collector *traffic.Collector
 	if store != nil {
 		users, ok := core.(node.UserRuntime)
 		if !ok {
@@ -49,8 +51,27 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 		done := make(chan struct{})
 		go func() { defer close(done); manager.Run(workerCtx) }()
 		defer func() { cancel(); <-done }()
+		if trafficStore, ok := store.(traffic.Store); ok {
+			source, ok := core.(traffic.Source)
+			if !ok {
+				return errors.New("selected core does not support traffic observations")
+			}
+			collector, err = traffic.NewCollector(source, trafficStore)
+			if err != nil {
+				return err
+			}
+			trafficCtx, cancelTraffic := context.WithCancel(ctx)
+			trafficDone := make(chan struct{})
+			go func() { defer close(trafficDone); collector.Run(trafficCtx) }()
+			defer func() { cancelTraffic(); <-trafficDone }()
+		}
 	}
-	server := &http.Server{Handler: httpapi.NewWithUsers(cfg.Token, cfg.VLESS != nil, core.Ready, manager), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
+	// Avoid a typed nil interface for the optional traffic endpoint.
+	handler := httpapi.NewWithUsers(cfg.Token, cfg.VLESS != nil, core.Ready, manager)
+	if collector != nil {
+		handler = httpapi.NewWithTraffic(cfg.Token, cfg.VLESS != nil, core.Ready, manager, collector)
+	}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 * 1024}
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()
 	slog.Info("agent ready", "coreVersion", version, "vpnConfigured", cfg.VLESS != nil)

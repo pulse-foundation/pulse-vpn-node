@@ -80,25 +80,43 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS node_schema_migrations (version integer PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return node.ErrUnavailable
 	}
-	var newest int
-	if err = tx.QueryRow(ctx, "SELECT COALESCE(max(version),0) FROM node_schema_migrations").Scan(&newest); err != nil || newest > 1 {
-		return node.ErrUnavailable
-	}
-	sql, err := migrationFiles.ReadFile("migrations/001_users.sql")
+	// The explicit order is the reviewed schema history. Reject gaps, unknown
+	// versions and changed checksums before applying any pending migration.
+	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql"}
+	rows, err := tx.Query(ctx, "SELECT version,checksum FROM node_schema_migrations ORDER BY version")
 	if err != nil {
 		return node.ErrUnavailable
 	}
-	sum := sha256.Sum256(sql)
-	if newest == 1 {
-		var saved []byte
-		if err = tx.QueryRow(ctx, "SELECT checksum FROM node_schema_migrations WHERE version=1").Scan(&saved); err != nil || string(saved) != string(sum[:]) {
+	var saved [][]byte
+	for rows.Next() {
+		var version int
+		var checksum []byte
+		if err := rows.Scan(&version, &checksum); err != nil || version != len(saved)+1 || version > len(files) {
+			rows.Close()
 			return node.ErrUnavailable
 		}
-	} else {
+		saved = append(saved, checksum)
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return node.ErrUnavailable
+	}
+	for i, file := range files {
+		sql, err := migrationFiles.ReadFile(file)
+		if err != nil {
+			return node.ErrUnavailable
+		}
+		sum := sha256.Sum256(sql)
+		if i < len(saved) {
+			if string(saved[i]) != string(sum[:]) {
+				return node.ErrUnavailable
+			}
+			continue
+		}
 		if _, err = tx.Exec(ctx, string(sql)); err != nil {
 			return node.ErrUnavailable
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO node_schema_migrations(version,checksum) VALUES(1,$1)", sum[:]); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO node_schema_migrations(version,checksum) VALUES($1,$2)", i+1, sum[:]); err != nil {
 			return node.ErrUnavailable
 		}
 	}

@@ -1,0 +1,9 @@
+# Overlay on reality-test + users-test: baseline has no credentials or raw samples.
+services:
+  probe:
+    volumes:
+      - fixtures:/fixtures:ro
+      - traffic-baseline:/traffic-baseline
+
+volumes:
+  traffic-baseline:

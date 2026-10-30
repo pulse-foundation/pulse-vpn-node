@@ -28,8 +28,13 @@ func New(token string, vpnConfigured bool, check func(context.Context) (string, 
 }
 
 func NewWithUsers(token string, vpnConfigured bool, check func(context.Context) (string, error), users *node.UserManager) http.Handler {
+	return NewWithTraffic(token, vpnConfigured, check, users, nil)
+}
+
+func NewWithTraffic(token string, vpnConfigured bool, check func(context.Context) (string, error), users *node.UserManager, traffic trafficReader) http.Handler {
 	mux := http.NewServeMux()
 	userRoutes(mux, users)
+	trafficRoutes(mux, traffic)
 	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()

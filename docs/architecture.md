@@ -9,7 +9,8 @@ The current startup slice reads a bounded, validated JSON file through `internal
 passthrough. No file means idle; an invalid file fails startup. File edits require an explicit restart
 in startup-file mode. Optional PostgreSQL management now persists users, revisions and idempotent
 operations, and reconciles user changes through live reload. The file seeds users only once;
-transport changes still require restart. Traffic accounting and telemetry remain unimplemented.
+transport changes still require restart. Managed nodes collect approximate traffic totals; VPS telemetry
+remains unimplemented. See [traffic accounting](traffic.md) for the implemented storage and API contract.
 See [local setup](local-reality.md) and [live users](live-users.md).
 
 ## Responsibilities and deployment
@@ -95,7 +96,9 @@ The optional `node.UserRuntime` contract now provides live user replacement and 
 session sweeps; `node.UserStore` persists intent independently of the adapter. The application owns
 one reconciler and repeats cleanup after late observations. Failed/ambiguous reloads keep latest
 cleanup intent separate from last verified revision, including during database outages. No automatic
-rollback may re-enable revoked users. Traffic capabilities remain separate and unimplemented.
+rollback may re-enable revoked users. The separate `traffic.Source` capability reads bounded cumulative
+connection counters. An application-owned `traffic.Collector` persists them through `traffic.Store`;
+database faults degrade collection without stopping the core or user reconciler.
 Implementing `Runtime` alone does not imply live-user or accounting support.
 
 ### Libraries and operations
@@ -176,6 +179,13 @@ not equate agent restart with confirmed core restart. A transient DB outage shou
 working core serving; reject mutations that cannot be persisted and expose degraded management health.
 Approximate accounting may lose observations during outages; do not trade that allowance for double
 counting already committed traffic.
+
+The current implementation polls every two seconds after each attempt and stores totals plus
+checkpoints in migration `002_traffic.sql`. User `name` is currently an immutable, non-reusable key;
+renaming and hard deletion are unsupported. A future display name must not replace this attribution
+key. A fresh cryptographically random generation is allocated only after starting a new owned child.
+No orphan adoption or agent-only continuation is implemented. Snapshot sequence orders observations
+within that generation. See [traffic accounting](traffic.md) for pruning, reset and capacity semantics.
 
 ## VPS telemetry and network checks
 

@@ -6,6 +6,21 @@ info:
 security:
   - nodeToken: []
 paths:
+  /api/v1/traffic:
+    get:
+      operationId: getUserTraffic
+      summary: Read approximate cumulative user payload bytes and collection health
+      responses:
+        '200':
+          description: Durable totals including disabled identities; inspect state, stale and observedAt before using
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Traffic'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Accounting not configured or database unavailable
   /api/v1/status:
     get:
       operationId: getRuntimeStatus
@@ -129,6 +144,59 @@ components:
       type: http
       scheme: bearer
   schemas:
+    Traffic:
+      type: object
+      required: [approximate, pollIntervalSeconds, state, stale, observedAt, users, resetCount, skippedConnections]
+      properties:
+        approximate:
+          type: boolean
+          enum: [true]
+        pollIntervalSeconds:
+          type: integer
+          enum: [2]
+          description: Delay after each bounded collection attempt
+        state:
+          type: string
+          enum: [starting, collecting, degraded]
+        stale:
+          type: boolean
+          description: No committed observation or observation older than ten seconds
+        observedAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          description: Sanitized collection failure
+        resetCount:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Cumulative connection counter reset/rebaseline events
+        skippedConnections:
+          type: integer
+          minimum: 0
+          maximum: 16384
+          description: Latest sample connections skipped due to unknown attribution, retention cutoff or capacity
+        users:
+          type: array
+          maxItems: 1024
+          items:
+            type: object
+            required: [name, enabled, uploadBytes, downloadBytes]
+            properties:
+              name:
+                type: string
+                description: Immutable node identity key, retained when disabled
+              enabled:
+                type: boolean
+              uploadBytes:
+                type: string
+                pattern: '^[0-9]+$'
+                description: Client to destination payload bytes
+              downloadBytes:
+                type: string
+                pattern: '^[0-9]+$'
+                description: Destination to client payload bytes
     Status:
       type: object
       required: [status, vpnConfigured, core]

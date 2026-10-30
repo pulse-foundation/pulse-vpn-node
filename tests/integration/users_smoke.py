@@ -40,9 +40,9 @@ def core_identity():
     return value
 
 
-def run_live(target_ip):
+def run_live(target_ip, probe_command="users-live"):
     proc = subprocess.Popen(COMPOSE + ["run", "--rm", "--no-deps", "-T", "-e",
-                            "REALITY_TEST_TARGET_IP=" + target_ip, "probe", "users-live"],
+                            "REALITY_TEST_TARGET_IP=" + target_ip, "probe", probe_command],
                             cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, text=True, bufsize=1)
     lines = queue.Queue()

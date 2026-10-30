@@ -37,6 +37,7 @@ func NewWithTraffic(token string, vpnConfigured bool, check func(context.Context
 }
 
 type Services struct {
+	StartupVLESS   *node.VLESS
 	Users          *node.UserManager
 	Traffic        trafficReader
 	Telemetry      *telemetry.Buffer
@@ -46,6 +47,7 @@ type Services struct {
 
 func NewWithServices(token string, vpnConfigured bool, check func(context.Context) (string, error), services Services) http.Handler {
 	mux := http.NewServeMux()
+	connectionRoutes(mux, services.StartupVLESS)
 	userRoutes(mux, services.Users)
 	trafficRoutes(mux, services.Traffic)
 	telemetryRoutes(mux, services.Telemetry, services.SampleInterval, services.ProbeInterval)

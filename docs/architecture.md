@@ -14,6 +14,13 @@ telemetry, configured network probes and a 15-minute RAM stream are implemented;
 separate work. See [traffic accounting](traffic.md) and [telemetry](telemetry.md) for current contracts.
 See [local setup](local-reality.md) and [live users](live-users.md).
 
+## Transport evolution
+
+[Single VLESS connection and transport selection](connections-and-access.md) records the agreed
+future boundary: one connection per Node, transport chosen at creation and inherited by all accesses,
+with explicit revisioned conversion/rollback. XHTTP and conversion are not implemented by this
+architecture change. Existing raw TCP behavior remains the baseline.
+
 ## Responsibilities and deployment
 
 Pulse owns the operator UI, fleet management, and global policy. This node exposes an authenticated

@@ -6,6 +6,68 @@ info:
 security:
   - nodeToken: []
 paths:
+  /api/v1/connection:
+    get:
+      operationId: getConnection
+      summary: Read the public startup VLESS connection descriptor
+      description: Immutable transport snapshot, independent of live users and readiness. No credentials or REALITY private key are returned.
+      responses:
+        '200':
+          description: Validated startup listener, or explicit null when VPN is not configured
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [schemaVersion, connection]
+                properties:
+                  schemaVersion:
+                    type: integer
+                    enum: [1]
+                  connection:
+                    type: object
+                    nullable: true
+                    additionalProperties: false
+                    required: [protocol, transport, listenPort, reality]
+                    properties:
+                      protocol:
+                        type: string
+                        enum: [vless]
+                      transport:
+                        type: object
+                        additionalProperties: false
+                        required: [type, flow]
+                        properties:
+                          type:
+                            type: string
+                            enum: [raw]
+                          flow:
+                            type: string
+                            enum: [xtls-rprx-vision]
+                      listenPort:
+                        type: integer
+                        minimum: 1
+                        maximum: 65535
+                      reality:
+                        type: object
+                        additionalProperties: false
+                        required: [publicKey, shortIds, serverNames]
+                        properties:
+                          publicKey:
+                            type: string
+                            description: Unpadded base64url X25519 public key derived from the startup private key
+                          shortIds:
+                            type: array
+                            items:
+                              type: string
+                          serverNames:
+                            type: array
+                            items:
+                              type: string
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Invalid connection settings; no internal validation details returned
   /api/v1/system/stats:
     get:
       operationId: getSystemStats

@@ -88,7 +88,7 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 		return err
 	}
 	joinTelemetry = stopTelemetry
-	services := httpapi.Services{Users: manager, Telemetry: buffer, SampleInterval: time.Duration(cfg.Telemetry.SampleIntervalSeconds) * time.Second, ProbeInterval: time.Duration(cfg.Telemetry.ProbeIntervalSeconds) * time.Second}
+	services := httpapi.Services{StartupVLESS: cfg.VLESS, Users: manager, Telemetry: buffer, SampleInterval: time.Duration(cfg.Telemetry.SampleIntervalSeconds) * time.Second, ProbeInterval: time.Duration(cfg.Telemetry.ProbeIntervalSeconds) * time.Second}
 	// Avoid a typed nil interface for the optional traffic endpoint.
 	if collector != nil {
 		services.Traffic = collector

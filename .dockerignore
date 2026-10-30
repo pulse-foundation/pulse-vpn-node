@@ -1,0 +1,15 @@
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!LICENSE
+!docs/
+!docs/dependencies.md
+!tests/
+!tests/integration/
+!tests/integration/*.go
+!tests/integration/realitylab/
+!tests/integration/realitylab/**

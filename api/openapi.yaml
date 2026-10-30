@@ -1,0 +1,499 @@
+openapi: 3.0.3
+info:
+  title: Pulse VPN Node
+  version: 0.1.0
+  description: Agent/core readiness with optional startup-configured VLESS + REALITY.
+security:
+  - nodeToken: []
+paths:
+  /api/v1/system/stats:
+    get:
+      operationId: getSystemStats
+      summary: Read cached resource and runtime observations without I/O
+      responses:
+        '200':
+          description: Independent latest resource/runtime envelopes, including partial or unavailable data
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [system, runtime]
+                properties:
+                  system:
+                    $ref: '#/components/schemas/TelemetryLatest'
+                  runtime:
+                    $ref: '#/components/schemas/TelemetryLatest'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Telemetry service unavailable
+  /api/v1/connectivity:
+    get:
+      operationId: getConnectivity
+      summary: Read cached configured outbound checks; never initiates a probe
+      responses:
+        '200':
+          description: Latest direct node-egress observations, not VPN-path or inbound reachability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryLatest'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Telemetry service unavailable
+  /api/v1/telemetry/samples:
+    get:
+      operationId: getTelemetrySamples
+      summary: Read a non-destructive bounded page from the 15-minute RAM stream
+      parameters:
+        - in: query
+          name: runId
+          description: Agent-run ID; supply together with after, or omit both for first page
+          schema:
+            type: string
+            pattern: '^[a-fA-F0-9]{32}$'
+        - in: query
+          name: after
+          description: Decimal uint64 position exclusively after this sequence, paired with runId
+          schema:
+            type: string
+            pattern: '^[0-9]+$'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 128
+            default: 64
+      responses:
+        '200':
+          description: Coherent retained page with cursor, eviction gap and run-change indicators; payload at most 512 KiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryPage'
+        '400':
+          description: Malformed, unpaired or future cursor, invalid/duplicate/unknown query parameter
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Telemetry service unavailable
+  /api/v1/traffic:
+    get:
+      operationId: getUserTraffic
+      summary: Read approximate cumulative user payload bytes and collection health
+      responses:
+        '200':
+          description: Durable totals including disabled identities; inspect state, stale and observedAt before using
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Traffic'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Accounting not configured or database unavailable
+  /api/v1/status:
+    get:
+      operationId: getRuntimeStatus
+      summary: Read agent/core readiness, not end-to-end VPN health
+      responses:
+        '200':
+          description: Pinned core controller responds and the core owns the reachable configured VPN TCP listener; not end-to-end VPN health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Core is unavailable, reports an unexpected version, or configured VPN listener ownership/reachability cannot be verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: Read desired users and runtime reconciliation state without credentials
+      responses:
+        '200':
+          description: Current desired users and runtime observations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Users'
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Management not configured or database unavailable
+  /api/v1/users/{name}:
+    put:
+      operationId: changeUser
+      summary: Commit a user creation or enable/disable intent
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9_-]{1,64}$'
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, expectedRevision]
+              properties:
+                uuid:
+                  type: string
+                  format: uuid
+                  writeOnly: true
+                  description: Lowercase nonzero UUID required only on creation; omit for existing identity
+                enabled:
+                  type: boolean
+                expectedRevision:
+                  type: integer
+                  format: int64
+                  minimum: 0
+      responses:
+        '202':
+          description: Durable intent accepted or original idempotent result; poll the operation
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOperation'
+        '400':
+          description: Invalid or oversized input
+        '401':
+          description: Missing or invalid bearer token
+        '409':
+          description: Stale revision, identity conflict or reused idempotency key with changed body
+        '503':
+          description: Management not configured or database unavailable; retry identical request and key
+  /api/v1/operations/{revision}:
+    get:
+      operationId: getUserOperation
+      parameters:
+        - in: path
+          name: revision
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Durable outcome for this revision; session cleanup is reported separately
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOperation'
+        '400':
+          description: Invalid revision
+        '401':
+          description: Missing or invalid bearer token
+        '404':
+          description: Operation not found
+        '503':
+          description: Management not configured or database unavailable
+components:
+  securitySchemes:
+    nodeToken:
+      type: http
+      scheme: bearer
+  schemas:
+    TelemetrySequence:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Unsigned 64-bit integer encoded as decimal string to preserve precision
+    TelemetryCursor:
+      type: object
+      required: [runId, after]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        after:
+          $ref: '#/components/schemas/TelemetrySequence'
+    TelemetryLatest:
+      type: object
+      required: [runId, sample, ageSeconds, stale]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        sample:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TelemetrySample'
+        ageSeconds:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Elapsed time since publication; sample has separate measurement timestamps
+        stale:
+          type: boolean
+          description: Missing sample or age exceeding three configured collection intervals
+    TelemetrySample:
+      type: object
+      required: [runId, sequence, kind, observedAt]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        sequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        kind:
+          type: string
+          enum: [system, runtime, connectivity]
+        observedAt:
+          type: string
+          format: date-time
+        metrics:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/TelemetryMetric'
+        checks:
+          type: array
+          maxItems: 32
+          description: Absent when no connectivity targets are configured
+          items:
+            $ref: '#/components/schemas/ConnectivityCheck'
+        runtime:
+          type: object
+          required: [coreState, userState]
+          properties:
+            coreState:
+              type: string
+              enum: [ready, degraded, unavailable]
+            coreVersion:
+              type: string
+            userState:
+              type: string
+              enum: [not_configured, pending, retrying, observed_empty, degraded]
+    TelemetryMetric:
+      type: object
+      required: [name, scope, unit, available, value, counter, observedAt]
+      properties:
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [host, container, process]
+        resource:
+          type: string
+          description: Explicit interface, device or filesystem name; never a raw path
+        unit:
+          type: string
+        available:
+          type: boolean
+        value:
+          type: number
+          nullable: true
+          description: Gauge value, null when unavailable or represented as an integer counter
+        counter:
+          type: string
+          pattern: '^[0-9]+$'
+          nullable: true
+        reason:
+          type: string
+          description: Safe unavailable reason code, never raw diagnostic text
+        observedAt:
+          type: string
+          format: date-time
+        windowSeconds:
+          type: number
+          minimum: 0
+    ConnectivityCheck:
+      type: object
+      required: [name, type, scope, vantage, status, observedAt, rttMilliseconds, lossPercent]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [dns, tcp, https, icmp]
+        scope:
+          type: string
+          enum: [container]
+        vantage:
+          type: string
+          enum: [node_direct]
+        status:
+          type: string
+          enum: [success, failed, unavailable]
+        reason:
+          type: string
+        observedAt:
+          type: string
+          format: date-time
+        rttMilliseconds:
+          type: number
+          minimum: 0
+          nullable: true
+        lossPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          nullable: true
+    TelemetryPage:
+      type: object
+      required: [runId, firstSequence, lastSequence, headSequence, records, nextCursor, gap, runChanged, hasMore]
+      properties:
+        runId:
+          type: string
+          pattern: '^[a-f0-9]{32}$'
+        firstSequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        lastSequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        headSequence:
+          $ref: '#/components/schemas/TelemetrySequence'
+        records:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/TelemetrySample'
+        nextCursor:
+          $ref: '#/components/schemas/TelemetryCursor'
+        gap:
+          type: boolean
+          description: Requested observations were evicted; resume at earliest retained position
+        runChanged:
+          type: boolean
+          description: Cursor belongs to another agent run; restart from earliest retained data in this run
+        hasMore:
+          type: boolean
+          description: More retained records existed after this coherent page
+    Traffic:
+      type: object
+      required: [approximate, pollIntervalSeconds, state, stale, observedAt, users, resetCount, skippedConnections]
+      properties:
+        approximate:
+          type: boolean
+          enum: [true]
+        pollIntervalSeconds:
+          type: integer
+          enum: [2]
+          description: Delay after each bounded collection attempt
+        state:
+          type: string
+          enum: [starting, collecting, degraded]
+        stale:
+          type: boolean
+          description: No committed observation or observation older than ten seconds
+        observedAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          description: Sanitized collection failure
+        resetCount:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Cumulative connection counter reset/rebaseline events
+        skippedConnections:
+          type: integer
+          minimum: 0
+          maximum: 16384
+          description: Latest sample connections skipped due to unknown attribution, retention cutoff or capacity
+        users:
+          type: array
+          maxItems: 1024
+          items:
+            type: object
+            required: [name, enabled, uploadBytes, downloadBytes]
+            properties:
+              name:
+                type: string
+                description: Immutable node identity key, retained when disabled
+              enabled:
+                type: boolean
+              uploadBytes:
+                type: string
+                pattern: '^[0-9]+$'
+                description: Client to destination payload bytes
+              downloadBytes:
+                type: string
+                pattern: '^[0-9]+$'
+                description: Destination to client payload bytes
+    Status:
+      type: object
+      required: [status, vpnConfigured, core]
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        vpnConfigured:
+          type: boolean
+          description: Whether validated VPN settings were supplied at startup; remains true when runtime health is degraded
+        core:
+          type: object
+          properties:
+            version:
+              type: string
+    UserOperation:
+      type: object
+      required: [revision, state]
+      properties:
+        revision:
+          type: integer
+          format: int64
+        state:
+          type: string
+          enum: [queued, applied, failed, superseded]
+        error:
+          type: string
+          description: Sanitized application failure, retryable by the reconciler
+    Users:
+      type: object
+      required: [revision, users, runtime]
+      properties:
+        revision:
+          type: integer
+          format: int64
+        users:
+          type: array
+          maxItems: 1024
+          items:
+            type: object
+            required: [name, enabled]
+            properties:
+              name:
+                type: string
+              enabled:
+                type: boolean
+        runtime:
+          type: object
+          required: [appliedRevision, cleanupState]
+          properties:
+            appliedRevision:
+              type: integer
+              format: int64
+              description: This process's last locally verified revision; zero before verification
+            applyingRevision:
+              type: integer
+              format: int64
+            cleanupState:
+              type: string
+              enum: [pending, retrying, observed_empty]
+              description: Repeated observation, never a strict drain guarantee
+            error:
+              type: string

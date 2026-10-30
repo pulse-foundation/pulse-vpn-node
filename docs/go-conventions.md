@@ -1,8 +1,9 @@
 # Go conventions for Pulse VPN Node
 
 These are implementation defaults. The Go module, Docker verification target and explicit SQL
-migration command are implemented; CI is not configured yet. Add runnable commands together with
-their implementation.
+migration command are implemented. GitHub Actions runs the shared native amd64/arm64 checks on
+PRs, pushes and release publication; see the README. Add runnable commands together with their
+implementation.
 
 ## Code and ownership
 

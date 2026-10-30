@@ -8,7 +8,6 @@ inside its own Compose project. Runtime fixture credentials never enter output.
 """
 
 import json
-import subprocess
 
 import users_smoke as lab
 
@@ -21,8 +20,7 @@ def main():
     if lab.command(lab.COMPOSE + ["ps", "-a", "-q"]):
         raise RuntimeError("telemetry test project exists; inspect before rerunning")
     try:
-        subprocess.run(lab.COMPOSE + ["build", "generate", "node"], cwd=lab.ROOT,
-                       check=True, timeout=600)
+        lab.prepare_images(lab.COMPOSE, lab.ROOT)
         # Fresh named volumes are root-owned; the probe gets only this test volume.
         lab.command(lab.COMPOSE + ["run", "--rm", "--no-deps", "-T", "--user", "0:0",
                                   "--cap-add", "CHOWN", "--entrypoint", "/bin/chown", "probe",

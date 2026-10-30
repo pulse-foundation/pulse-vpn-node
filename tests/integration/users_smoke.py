@@ -5,6 +5,8 @@ Run from the repository root with Docker Compose available:
 """
 
 import json
+
+from docker_images import prepare_images
 import queue
 import subprocess
 import threading
@@ -94,8 +96,7 @@ def main():
         raise RuntimeError("users test project exists; inspect before rerunning")
     try:
         # Credentials are generated at runtime; build diagnostics contain no fixtures.
-        subprocess.run(COMPOSE + ["build", "generate", "node"], cwd=ROOT,
-                       check=True, timeout=600)
+        prepare_images(COMPOSE, ROOT)
         command(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "120",
                            "target", "node", "client", "second"])
         target_id = command(COMPOSE + ["ps", "-q", "target"])

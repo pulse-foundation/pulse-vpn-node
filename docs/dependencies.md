@@ -29,3 +29,10 @@ This evidence does not cover production routing, filtering, mobile app builds or
 User management adds pgx v5.11.0 (MIT, github.com/jackc/pgx) with exact transitive versions/checksums
 in go.mod/go.sum. Local Compose pins PostgreSQL 17 Alpine by image digest. PostgreSQL is a separate
 service, not embedded in the agent image. See [live user tests](live-users.md).
+
+## CI actions
+
+GitHub Actions dependencies are pinned by full commit SHA in `.github/workflows/`. The version
+comments identify the reviewed release; update both the SHA and comment together. The publication
+job uses Docker Buildx v0.38.1. Native Ubuntu 24.04 runners cover amd64 and arm64; their managed OS
+images are updated by GitHub. Local workflow syntax was checked with actionlint v1.7.12.

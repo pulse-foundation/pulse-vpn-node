@@ -22,8 +22,9 @@ The agent retains its low-level idle/file-only modes, but these are not the stan
 
 Requires Docker with **Compose 2.24.4 or newer** (`!override` / `!reset` support).
 Go is not required on the host. Go 1.26.10, Mihomo v1.19.33 and image inputs are pinned;
-see [dependencies](docs/dependencies.md). Published node images and release automation are not
-available yet: build locally, or supply an image you have built via `PULSE_NODE_IMAGE`.
+see [dependencies](docs/dependencies.md). Release automation is configured in GitHub Actions; no release image has been published as part
+of this setup. Until the first release, build locally or supply an image you have built via
+`PULSE_NODE_IMAGE`.
 
 ## Try locally without preparing keys
 
@@ -147,6 +148,38 @@ Image builds run formatting, vet, unit tests, race tests and a static build. To 
 ```sh
 docker build --target check -t pulse-vpn-node-check:local .
 ```
+
+## GitHub Actions and releases
+
+- PRs and pushes run the shared verification workflow on native Linux **amd64 and arm64** runners.
+- Checks include the image build gates, Compose validation, real PostgreSQL transaction tests and
+  all five acceptance suites. Test projects must be clean before and after each run.
+- A **published GitHub Release** triggers the same checks, then publishes the verified image pair to
+  `ghcr.io/pulse-foundation/pulse-vpn-node:<release-tag>`. Release tags must look like `v0.1.0` or
+  `v0.1.0-rc.1`; prereleases are supported. There is no automatic `latest` tag.
+- Publication loads the saved images and checks their IDs and architectures; it never rebuilds them.
+  The version manifest includes source/revision/version annotations. Existing version tags are
+  rejected. Intermediate `build-<run>-<attempt>-<arch>` tags retain each uploaded architecture.
+- Only the publish job has `packages: write`, using GitHub's built-in `GITHUB_TOKEN`. PR/push checks
+  have read-only repository access. Actions are pinned to reviewed commit SHAs.
+- Publication does not update any VPS. Select the image tag/digest through `PULSE_NODE_IMAGE` when
+  separately performing an authorized update.
+
+The organization must allow Actions and package creation for this repository. After the first
+publication, make the GHCR package **public** if nodes should pull without authentication: public
+repository visibility does not automatically make a new container package public. No personal access
+token or production/SSH credentials are needed by these workflows. See [GitHub's registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+To run the same verification locally on the Docker daemon's native architecture:
+
+```sh
+python3 tests/integration/ci.py
+```
+
+This command never publishes an image. It checks that the runtime image ID remains unchanged across
+acceptance tests and leaves the verified image in the local Docker cache. The reusable workflow then
+saves it only for release runs. A successful local run does not prove GitHub permissions or registry
+publication; the first authorized release will exercise those external steps.
 
 ## Reference
 

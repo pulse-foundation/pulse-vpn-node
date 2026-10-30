@@ -97,6 +97,21 @@ services:
     <<: *client
     command: [-d, /tmp/client, -f, /fixtures/bad-key.json]
 
+  postgres-check:
+    image: pulse-vpn-node:checks
+    build:
+      context: .
+      target: check
+    command: [go, test, -race, -count=1, ./internal/postgres]
+    environment:
+      TEST_DATABASE_URL_FILE: /fixtures/database-url
+    volumes: ["fixtures:/fixtures:ro"]
+    networks: [back]
+    profiles: [test]
+    depends_on:
+      database:
+        condition: service_healthy
+
   probe:
     image: pulse-vpn-node-reality-lab:local
     command: [probe]

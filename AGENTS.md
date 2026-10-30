@@ -43,6 +43,9 @@ standard Go guidance lives in the conventions document rather than a duplicate g
 
 ## Always-on implementation rules
 
+- Keep working plans and execution notes local in ignored `.superpowers/` or `docs/superpowers/`.
+  Commit maintained architecture and operational docs, not temporary planning artifacts.
+
 - Keep one Go module. Put the executable under `cmd/pulse-vpn-node` and implementation under
   `internal`. Create packages when real code needs them; do not pre-create empty scaffolding.
 - Keep HTTP, SQL, and Mihomo transport details out of node policy. Wire concrete dependencies

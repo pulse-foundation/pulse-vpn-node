@@ -1,6 +1,8 @@
 """Run disposable VLESS/REALITY tests on internal Docker networks. No published ports."""
 
 import json
+
+from docker_images import prepare_images
 import subprocess
 from pathlib import Path
 
@@ -33,7 +35,7 @@ def main():
         raise RuntimeError("test project exists; inspect before rerunning")
     try:
         # Build logs contain no fixture credentials; fixtures are generated at runtime only.
-        subprocess.run(COMPOSE + ["build", "generate", "node"], cwd=ROOT, check=True, timeout=240)
+        prepare_images(COMPOSE, ROOT)
         command(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "90",
                            "target", "node", "client", "bad-uuid", "bad-key"])
         probe("probe")

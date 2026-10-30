@@ -1,6 +1,8 @@
 """Exercise lifecycle/auth using the complete disposable node lab; no host ports."""
 
 import json
+
+from docker_images import prepare_images
 from pathlib import Path
 import subprocess
 import time
@@ -34,8 +36,7 @@ def main():
     if command(COMPOSE + ["ps", "-a", "-q"]).stdout.strip():
         raise RuntimeError("smoke project already exists; inspect it before running this test")
     try:
-        subprocess.run(COMPOSE + ["build", "generate", "node"], cwd=ROOT,
-                       check=True, timeout=600)
+        prepare_images(COMPOSE, ROOT)
         command(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "90", "node"])
         cid = command(COMPOSE + ["ps", "-q", "node"]).stdout.strip()
         assert inspect(cid)["State"]["Health"]["Status"] == "healthy"

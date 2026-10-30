@@ -1,0 +1,51 @@
+name: Verify node images
+on:
+  workflow_call:
+    inputs:
+      save-images:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Verify (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check native Docker platform
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(docker version --format '{{.Server.Arch}}')" = "$EXPECTED_ARCH"
+          docker compose version
+      - name: Build and verify the complete node
+        run: python3 tests/integration/ci.py
+      - name: Save the verified image
+        if: inputs.save-images
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/verified"
+          docker image inspect pulse-vpn-node:integration-test --format '{{.Id}}' > "$RUNNER_TEMP/verified/$ARCH.id"
+          docker save pulse-vpn-node:integration-test -o "$RUNNER_TEMP/verified/$ARCH.tar"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.save-images
+        with:
+          name: verified-${{ matrix.arch }}
+          path: ${{ runner.temp }}/verified/
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error

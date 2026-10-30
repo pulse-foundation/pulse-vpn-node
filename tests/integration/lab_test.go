@@ -21,6 +21,7 @@ const nodeImage = "pulse-vpn-node:integration-test"
 
 var prebuilt = flag.Bool("images-prebuilt", false, "require existing node, helper and check images instead of building")
 var cases = []struct{ name, project string }{
+	{"Init", "pulse-vpn-node-init-test"},
 	{"Postgres", "pulse-vpn-node-storage-test"},
 	{"Lifecycle", "pulse-vpn-node-smoke"},
 	{"Reality", "pulse-vpn-node-reality-test"},

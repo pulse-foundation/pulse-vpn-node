@@ -39,6 +39,31 @@ network. Publish only the intended VPN listener publicly. Do not add TUN, NET_AD
 mode, or host networking merely because Mihomo supports them; select networking when real port and
 client-address requirements justify it. Run with the least privileges needed for the chosen ports.
 
+## Noninteractive initialization
+
+`pulse-vpn-node init` prepares the four external files consumed by the main Compose:
+`api-token`, `database-password`, `database-url`, and `vless.json`. Pulse chooses the
+image, REALITY destination/SNI and port mapping; its provisioning worker will invoke this command.
+That Pulse integration is separate work. Init only touches its configuration directory: no Docker socket, service startup, database
+connections, migrations, DNS requests or TLS probes.
+
+`internal/bootstrap` owns this filesystem boundary and cryptographic generation. It uses the
+same token/VLESS validators as runtime startup. Fresh configuration has no users; Pulse adds users
+through the API after the full stack is ready. Existing valid files are immutable to init, including
+keys, initial users and permissions. Explicit conflicting settings or inconsistent database
+credentials fail before any configuration is published. Either missing database credential file
+can be reconstructed from the other; losing both is not recoverable against an existing SQL volume.
+
+The directory is private (0700); new files are 0644 so Docker's bind-mounted secrets remain readable
+by the non-root runtime UID. Init rejects symlinks/nonregular files, bounds reads, serializes runs with
+a kernel lock, and publishes complete files without replacement. Publication is atomic per file,
+not a four-file transaction: retries finish interrupted initialization without rotating persisted
+secrets. Deployment upgrades, transport edits and secret rotation are separate operations.
+
+Integration includes offline init/repeat/conflict checks and boots the unchanged main Compose from
+those generated files, using ephemeral loopback host ports. The other integration scenarios keep
+their isolated test overlay and no published ports.
+
 ## Package map
 
 Create these paths incrementally as working code is introduced:
@@ -46,6 +71,7 @@ Create these paths incrementally as working code is introduced:
 ```text
 cmd/pulse-vpn-node/main.go   process entrypoint and exit code
 internal/app/              dependency wiring, startup and shutdown ordering
+internal/bootstrap/        offline init, secret preservation and atomic file publication
 internal/config/           agent settings and validation, not VPN config generation
 internal/node/             users, desired revisions, operations, reconciliation policy
 internal/mihomo/           config rendering, controller adapter, child lifecycle

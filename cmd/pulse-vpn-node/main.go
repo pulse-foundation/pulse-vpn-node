@@ -24,6 +24,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		return runInit(os.Args[2:], os.Stdout)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -35,7 +38,7 @@ func run() error {
 			return app.Migrate(ctx, cfg)
 		}
 		if len(os.Args) != 2 || (os.Args[1] != "healthcheck" && os.Args[1] != "status") {
-			return errors.New("usage: pulse-vpn-node [healthcheck|status|migrate]")
+			return errors.New("usage: pulse-vpn-node [init|healthcheck|status|migrate]")
 		}
 		return check(cfg, os.Args[1] == "status")
 	}

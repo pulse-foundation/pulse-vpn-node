@@ -20,6 +20,14 @@ func loadVLESS(path string) (*node.VLESS, error) {
 	if err != nil || len(raw) > 65536 {
 		return nil, errors.New("cannot read VLESS settings within 64 KiB limit")
 	}
+	return ParseVLESS(raw)
+}
+
+// ParseVLESS validates bounded startup settings without reading files.
+func ParseVLESS(raw []byte) (*node.VLESS, error) {
+	if len(raw) > 65536 {
+		return nil, errors.New("VLESS settings exceed 64 KiB limit")
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var vpn *node.VLESS

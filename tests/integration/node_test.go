@@ -15,6 +15,10 @@ func TestNode(t *testing.T) {
 	}
 	for _, c := range cases {
 		ok := t.Run(c.name, func(t *testing.T) {
+			if c.name == "Init" {
+				s.initialize(t, c.project)
+				return
+			}
 			l := s.start(t, c.project)
 			switch c.name {
 			case "Postgres":

@@ -33,14 +33,9 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, errors.New("cannot read API token file")
 	}
-	token := strings.TrimRight(string(raw), "\r\n")
-	if len(raw) > 4096 || len(token) < 32 || len(token) > 256 {
-		return Config{}, errors.New("API token must contain 32 to 256 printable non-space ASCII characters")
-	}
-	for _, c := range token {
-		if c < 33 || c > 126 {
-			return Config{}, errors.New("API token contains invalid characters")
-		}
+	token, err := ParseToken(raw)
+	if err != nil {
+		return Config{}, err
 	}
 	cfg := Config{Listen: envDefault("PULSE_NODE_LISTEN", "127.0.0.1:8080"), Token: token, Binary: envDefault("PULSE_NODE_MIHOMO_BINARY", "/usr/local/bin/mihomo"), RuntimeDir: envDefault("PULSE_NODE_RUNTIME_DIR", "/run/pulse-node")}
 	cfg.Telemetry, err = loadTelemetry(os.Getenv("PULSE_NODE_TELEMETRY_FILE"))
@@ -79,4 +74,18 @@ func envDefault(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// ParseToken validates the same bounded token format for startup and initialization.
+func ParseToken(raw []byte) (string, error) {
+	token := strings.TrimRight(string(raw), "\r\n")
+	if len(raw) > 4096 || len(token) < 32 || len(token) > 256 {
+		return "", errors.New("API token must contain 32 to 256 printable non-space ASCII characters")
+	}
+	for _, c := range token {
+		if c < 33 || c > 126 {
+			return "", errors.New("API token contains invalid characters")
+		}
+	}
+	return token, nil
 }

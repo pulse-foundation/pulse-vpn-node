@@ -144,6 +144,11 @@ func (p *Probes) https(ctx context.Context, address string) error {
 		return errHTTPStatus
 	}
 	_, err = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	// Response EOF can race request cancellation. A finished body must not turn
+	// an expired or canceled probe into a successful connectivity observation.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	return err
 }
 

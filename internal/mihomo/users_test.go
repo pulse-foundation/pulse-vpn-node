@@ -171,7 +171,23 @@ func TestApplyUsersAmbiguousFailureDoesNotRollback(t *testing.T) {
 
 func TestApplyUsersRequiresOwnedListenerAfterReload(t *testing.T) {
 	var p *Process
-	p, _, _ = liveProcess(t, func(w http.ResponseWriter, r *http.Request) { p.cmd.Process.Kill(); w.WriteHeader(204) })
+	p, _, _ = liveProcess(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := p.cmd.Process.Kill(); err != nil {
+			t.Error("cannot stop helper", err)
+			w.WriteHeader(500)
+			return
+		}
+		// Kill only sends a signal. Wait for cmd.Wait to observe exit before
+		// replying; Done also waits for this in-flight operation and would deadlock.
+		select {
+		case <-p.lifetime.Done():
+		case <-time.After(5 * time.Second):
+			t.Error("helper did not exit after kill")
+			w.WriteHeader(500)
+			return
+		}
+		w.WriteHeader(204)
+	})
 	if err := p.ApplyUsers(context.Background(), nil); err == nil {
 		t.Fatal("204 without listener counted as applied")
 	}

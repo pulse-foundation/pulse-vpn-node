@@ -171,7 +171,7 @@ func TestProbesHTTPSBodyDeadline(t *testing.T) {
 	trustProbeServer(p, server)
 	started := time.Now()
 	c := p.Sample(context.Background()).Checks[0]
-	if c.Status != "failed" || c.Reason != "timeout" || time.Since(started) > time.Second {
+	if c.Status != "failed" || c.Reason != "timeout" || c.RTTMilliseconds != nil || time.Since(started) > time.Second {
 		t.Fatalf("body deadline: %+v", c)
 	}
 }

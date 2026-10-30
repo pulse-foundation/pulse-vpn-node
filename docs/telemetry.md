@@ -27,7 +27,8 @@ sample or a reset yields an unavailable rate. Missing sources invalidate their b
 interfaces are never summed, and these counters are not assigned to VPN users. Unbounded cgroup memory
 (`memory.max=max`) is explicitly unavailable with reason `unbounded` rather than a fake limit.
 
-By default, only container/process visibility is used; host metrics report `not_configured`. cgroup v1
+Without a telemetry configuration, only container/process visibility is used; host metrics report
+`not_configured`. The standard Compose configures read-only host proc sources. cgroup v1
 is unsupported and missing v2 files remain unavailable. On Docker Desktop, a host proc mount describes
 the **Linux Docker VM**, not the macOS/Windows machine. Native measurements target Linux VPS deployment.
 Core uptime is elapsed time since this agent observed the new child start, excluding later readiness
@@ -42,10 +43,10 @@ Allowed resource interval: 1–60s; probe interval: 5–300s; timeout: 100–5,0
 There are at most eight entries per resource selection and 16 probe targets. Invalid settings fail
 startup with sanitized errors. Intervals are delays after completion, so slow attempts extend them.
 
-For optional **local Linux** host visibility, copy the example to `.local/telemetry.json` and combine
-`deploy/compose.telemetry.yaml` with the existing Compose files. The private parent directory stays
-0700; the non-secret settings file needs to be readable by container UID 10001. The overlay mounts
-five individual read-only proc files. It adds no capabilities, privileged mode, host PID/network mode,
+The root `compose.yaml` mounts the example by default and exposes five individual read-only Linux
+proc files. To customize settings, copy the example to `.local/telemetry.json` and set
+`PULSE_NODE_TELEMETRY_CONFIG=./.local/telemetry.json`. The private parent directory stays 0700;
+the settings file needs to be readable by container UID 10001. It adds no capabilities, privileged mode, host PID/network mode,
 host root filesystem mount or Docker socket. Host proc and cgroup settings must refer to actual local
 Linux proc/cgroup sources, never remote paths, FIFOs or arbitrary files.
 

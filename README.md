@@ -1,121 +1,158 @@
 # Pulse VPN Node
 
-Go server agent for Pulse VPN, managing a separate pinned Mihomo process. The Pulse control panel
-remains a separate project. This repository is GPLv3.
+Go server agent for Pulse VPN, running a separate pinned Mihomo process. Pulse remains the control
+panel; VPN clients connect directly to this node. This repository is GPLv3.
 
-**Current status:** local agent/core lifecycle and optional startup-configured VLESS + REALITY
-over raw TCP with Vision. The agent validates settings, starts the pinned Mihomo child, serves
-authenticated readiness, and stops/reaps the child. Without a VPN file it starts idle and reports
-`vpnConfigured: false`. Optional PostgreSQL-backed user management supports live add/enable/disable.
-Managed nodes also persist approximate per-user traffic and expose it through the authenticated API.
-VPS/container telemetry, configured network checks and a 15-minute RAM buffer are available.
-Pulse-side import and dashboards remain separate work.
+The complete node provides VLESS + REALITY over raw TCP with Vision, live user management,
+approximate per-user traffic totals, resource metrics, configured network checks and a 15-minute
+in-memory telemetry buffer. PostgreSQL stores users, operations and traffic totals. Pulse owns
+monitoring history; its importer and dashboards are separate work.
 
-The agent lifecycle uses shared `node.Core` / `node.Runtime` contracts. Mihomo is the only implemented
-adapter; adding another core requires its adapter, wiring and packaging, without changing the HTTP
-API or serving lifecycle. See the [adapter boundary](docs/architecture.md#core-adapter-boundary).
+## Launch layout
 
-## Run locally
+| File | Purpose |
+| --- | --- |
+| `compose.yaml` | Complete Linux node: agent + Mihomo, private PostgreSQL, one-off migrations |
+| `compose.dev.yaml` | Local source build, loopback-only ports, automatic restart disabled |
+| `tests/integration/compose.yaml` | Test overlay on the main node: disposable credentials, clients and local targets |
 
-Requires Docker with Compose. Go need not be installed on the host. Build inputs are pinned to
-Go 1.26.10 and Mihomo v1.19.33 by image digest; see [dependencies](docs/dependencies.md).
+There are two long-running containers, `node` and `database`. `migrate` must finish successfully
+before the node starts. Users, traffic and telemetry do not require separate Compose overlays.
+The agent retains its low-level idle/file-only modes, but these are not the standard launch path.
 
-From the repository root, create a token once:
+Requires Docker with **Compose 2.24.4 or newer** (`!override` / `!reset` support).
+Go is not required on the host. Go 1.26.10, Mihomo v1.19.33 and image inputs are pinned;
+see [dependencies](docs/dependencies.md). Published node images and release automation are not
+available yet: build locally, or supply an image you have built via `PULSE_NODE_IMAGE`.
 
-```sh
-mkdir -p .local
-chmod 700 .local
-test -f .local/api-token || (umask 077; openssl rand -hex 32 > .local/api-token)
-chmod 644 .local/api-token
-docker compose -f deploy/compose.yaml up --build --wait
-```
+## Try locally without preparing keys
 
-The parent directory is private on the host. The token file is readable by the container's non-root
-user through its read-only Compose secret mount; do not relax the parent directory's permissions.
-`.local/` is excluded from Git and the Docker build context. Do not print or commit its contents.
-
-The API is published only at `127.0.0.1:18080`; set `PULSE_NODE_PORT` to override the host port.
-The core controller stays inside the container at `127.0.0.1:19090` with a random per-launch secret.
-The container runs without root, extra capabilities, a writable root filesystem, or a Docker socket.
-Private runtime artifacts live on bounded tmpfs. PostgreSQL is intentionally absent from this first
-idle mode. The optional managed overlay adds a separate database and explicit migration service.
-
-Read authenticated status without putting credentials in command arguments:
-
-```sh
-docker compose -f deploy/compose.yaml exec node pulse-vpn-node status
-```
-
-Expected:
-
-```json
-{"status":"ready","vpnConfigured":false,"core":{"version":"v1.19.33"}}
-```
-
-`GET /api/v1/status` requires `Authorization: Bearer <token>` and returns 401 without it. Core
-unavailability/version mismatch returns 503 while the agent is serving. Unexpected core exit stops
-the agent with a nonzero exit code. Local Compose does not auto-restart failures, so they remain
-visible. Raw core output is discarded to avoid leaking generated configuration or secrets; startup
-and lifecycle failures are reported with safe messages. Start the service again after diagnosing.
-
-```sh
-docker compose -f deploy/compose.yaml logs --tail=50 node
-docker compose -f deploy/compose.yaml down
-```
-
-## Live users
-
-See [live user management](docs/live-users.md) for the PostgreSQL overlay, API, idempotency and
-reconciliation behavior. Run its disposable local test with `python3 tests/integration/users_smoke.py`.
-
-## Traffic statistics
-
-`GET /api/v1/traffic` returns durable upload/download byte totals per user, the last saved observation
-time and collection health. Collection runs independently of API reads. See [traffic accounting](docs/traffic.md)
-for the migration, approximation limits and local test: `python3 tests/integration/traffic_smoke.py`.
-
-## Verify
-
-See [node telemetry](docs/telemetry.md) for resource visibility, cached statistics, configured
-connectivity checks and cursor-based catch-up. Run `python3 tests/integration/telemetry_smoke.py`
-for its isolated local acceptance test. No public target is probed by default.
-
-The isolated VPN test starts an agent-managed server and a separate Mihomo client, both v1.19.33,
-with fresh credentials and local HTTP/HTTPS/UDP targets. It publishes no host ports, uses no existing
-VPN profile, and removes its own containers, networks and credentials afterward:
+From the repository root:
 
 ```sh
 python3 tests/integration/reality_smoke.py
 ```
 
-See [local VLESS + REALITY](docs/local-reality.md) for configuration and the test's limits.
+This builds the full node and a real Mihomo client, generates fresh credentials and a local TLS
+target, verifies HTTP/HTTPS/UDP and rejects invalid credentials, then removes its own containers,
+volumes and networks. It publishes no host ports and does not read `.local/`, use an existing VPN
+profile or contact public targets. Python 3 is required for test runners.
 
-The Docker build runs formatting verification, `go vet`, unit tests, race tests, and a static build.
-To run only that stage:
+## Configure a persistent node
+
+Prepare a private directory, `.local/` by default (override with `PULSE_NODE_CONFIG_DIR`):
+
+| File | Contents |
+| --- | --- |
+| `api-token` | Random management bearer token, at least 32 characters |
+| `database-password` | PostgreSQL password |
+| `database-url` | Matching URL for user/database `pulse_node` at `database:5432` |
+| `vless.json` | REALITY transport and initial users; listen on `0.0.0.0:8443` |
+
+See the [VLESS settings contract](docs/local-reality.md#startup-settings) for `vless.json`.
+Use your own keys and destination for a persistent node; test fixtures are disposable.
+An initializer and client-profile export are not implemented yet.
+
+For a new local installation, generate the token and matching database files once. This command
+preserves existing files and prints no secrets:
+
+```sh
+python3 - <<'PYSETUP'
+from pathlib import Path
+from secrets import token_hex
+from urllib.parse import quote
+
+root = Path('.local')
+root.mkdir(mode=0o700, exist_ok=True)
+root.chmod(0o700)
+for name in ('api-token', 'database-password'):
+    path = root / name
+    if not path.exists():
+        path.write_text(token_hex(32))
+        path.chmod(0o644)
+dsn = root / 'database-url'
+if not dsn.exists():
+    password = quote((root / 'database-password').read_text().strip(), safe='')
+    dsn.write_text(f'postgres://pulse_node:{password}@database:5432/pulse_node?sslmode=disable')
+    dsn.chmod(0o644)
+PYSETUP
+```
+
+Keep the directory mode **0700**. Files mounted as Compose secrets must be readable by container
+UID 10001; mode 0644 inside that private parent works for local bind-based secrets. Apply the same
+rule to `vless.json`. `.local/` is excluded from Git and the image build context. Never print or
+commit these files. Protect database volumes/backups too; VPN credentials are recoverable there.
+
+Telemetry uses `deploy/telemetry.example.json` by default: five read-only Linux proc mounts,
+container/process metrics and **no outbound probe targets**. To customize it, copy the example and
+set `PULSE_NODE_TELEMETRY_CONFIG` to the new file. On Docker Desktop, host metrics describe the
+Linux VM, not macOS/Windows. See [telemetry](docs/telemetry.md) for visibility limits and probes.
+
+## Start and operate
+
+For local development, after preparing the four files:
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml build node
+docker compose -f compose.yaml -f compose.dev.yaml up --wait
+docker compose -f compose.yaml -f compose.dev.yaml exec node pulse-vpn-node status
+```
+
+Expected status includes `status: ready`, `vpnConfigured: true`, and core version `v1.19.33`.
+The API is at `127.0.0.1:18080` and VPN at `127.0.0.1:18443`. Override host ports with
+`PULSE_NODE_PORT` and `PULSE_NODE_VPN_PORT`. Dev keeps failures visible instead of restarting them.
+
+On a prepared Linux VPS with the selected image available, the full launch needs just:
+
+```sh
+docker compose up --wait
+docker compose exec node pulse-vpn-node status
+```
+
+The main file publishes VPN TCP **443** by default (`PULSE_NODE_VPN_BIND` / `PULSE_NODE_VPN_PORT`),
+while management stays on loopback port 18080. PostgreSQL has no host port; the core controller
+stays inside the container. Node and database restart unless explicitly stopped. The node runs
+without root, added capabilities, a writable root filesystem or a Docker socket.
+
+Use the same files, project name and environment for subsequent `logs`, `up` and `down` commands.
+`down` preserves the database volume; **do not use `down --volumes` for a persistent node**.
+After changing the image, run `up --wait` so migrations precede agent startup. Back up the database
+before upgrades: an older image is not guaranteed to understand a newer schema.
+
+**Existing local installations:** the old files used project name `pulse-vpn-node-local`.
+Keep that name with `-p pulse-vpn-node-local` on every command to reuse its `node_database` volume;
+the new default is `pulse-vpn-node`. Preserve your existing secrets. Initial users seed only an empty
+database; changing `vless.json` does not reset managed users. Transport changes require a restart.
+
+## Verify
+
+All acceptance scripts use the same full node plus the single test overlay. Each owns a separate
+project and cleans up only its disposable resources. They do not require persistent node settings.
+
+```sh
+python3 tests/integration/compose_check.py
+python3 tests/integration/docker_smoke.py
+python3 tests/integration/reality_smoke.py
+python3 tests/integration/users_smoke.py
+python3 tests/integration/traffic_smoke.py
+python3 tests/integration/telemetry_smoke.py
+```
+
+These cover effective Compose isolation, authentication/lifecycle, real VPN traffic, live user
+changes with existing sessions, database outages, persistent traffic totals and telemetry catch-up.
+They establish local compatibility, not filtering resistance or mobile-app behavior.
+
+Image builds run formatting, vet, unit tests, race tests and a static build. To run that stage alone:
 
 ```sh
 docker build --target check -t pulse-vpn-node-check:local .
 ```
 
-With the local image built and `.local/api-token` created, the integration smoke test uses a separate
-Compose project and loopback port 18081 (override with `PULSE_NODE_SMOKE_PORT`). It checks real core
-readiness, API authentication, core crash propagation, restart, invalid binary startup, and SIGTERM
-shutdown, then removes only its own containers/network. Python 3 is needed for this test.
+## Reference
 
-```sh
-python3 tests/integration/docker_smoke.py
-```
-
-Set `PULSE_NODE_IMAGE` to use a different local image tag, for example
-`PULSE_NODE_IMAGE=pulse-vpn-node:reality-test python3 tests/integration/docker_smoke.py`.
-
-With Go 1.26.10 installed: `go vet ./...`, `go test ./...`, `go test -race ./...`, and
-`go build ./cmd/pulse-vpn-node`. Runtime/process tests target Unix; Docker is the reference environment.
-
-## Guidance
-
-- [Architecture and planned package boundaries](docs/architecture.md)
-- [Go conventions](docs/go-conventions.md)
-- [Agent rules and skill routing](AGENTS.md)
+- [Architecture and core adapter](docs/architecture.md)
+- [Live users and migrations](docs/live-users.md)
+- [Approximate traffic accounting](docs/traffic.md)
+- [Telemetry and catch-up API](docs/telemetry.md)
 - [HTTP contract](api/openapi.yaml)
-- [GNU GPLv3](LICENSE)
+- [Go conventions](docs/go-conventions.md), [agent rules](AGENTS.md), [GNU GPLv3](LICENSE)

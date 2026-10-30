@@ -1,8 +1,8 @@
 # Pulse VPN Node architecture baseline
 
-Status: initial implementation baseline, 2026-10-30. These boundaries describe the intended
-first implementation. The executable currently covers the local agent/core lifecycle, authenticated
-readiness API, and optional startup-configured VLESS + REALITY/Vision. User requirements take precedence.
+Status: implemented node baseline, 2026-10-30. The executable covers the agent/core lifecycle,
+authenticated API, VLESS + REALITY/Vision, live users, traffic accounting and buffered telemetry.
+User requirements take precedence.
 
 The current startup slice reads a bounded, validated JSON file through `internal/config` into the
 `internal/node` model; `internal/mihomo` renders it for the pinned core. There is no raw core-config
@@ -27,6 +27,12 @@ service. The agent owns child startup, reload, failure reporting, and shutdown. 
 container restart and PostgreSQL lifetime. Do not put a Docker client, host bootstrapper, Redis,
 frontend, or a second public administration panel in this service.
 
+The root Compose is the complete supported node, including user management, accounting and
+telemetry. Feature-specific Compose overlays are not part of the deployment interface. Development
+changes only source building, published loopback ports and restart policy. Integration tests inherit
+the same runtime services, substituting disposable credentials and isolated clients/targets with no
+published ports. Persistent settings belong outside the image; test fixtures stay under tests.
+
 The management API can bind inside the container but is published on host loopback for SSH access.
 The Mihomo controller stays on container loopback. PostgreSQL is reachable only on the Compose
 network. Publish only the intended VPN listener publicly. Do not add TUN, NET_ADMIN, privileged
@@ -47,10 +53,13 @@ internal/traffic/          observations, attribution, deltas and collector loop
 internal/telemetry/        VPS/container/process metrics, network probes, current snapshots
 internal/postgres/         concrete SQL queries, repositories and transaction boundaries
 internal/httpapi/          auth, request/response DTOs, routes and error mapping
-migrations/                versioned SQL migrations, when storage is implemented
-api/openapi.yaml           external HTTP contract, when endpoints are implemented
-deploy/compose.yaml        node + PostgreSQL deployment, when runnable
-Dockerfile                 reproducible agent + Mihomo image, when buildable
+internal/postgres/migrations/ reviewed versioned SQL migrations
+api/openapi.yaml           external HTTP contract
+compose.yaml               full node + PostgreSQL + one-off migration
+compose.dev.yaml           local build, loopback ports and restart policy
+tests/integration/compose.yaml disposable peers/fixtures over the main Compose
+deploy/                    non-secret configuration examples
+Dockerfile                 reproducible agent + Mihomo image
 docs/                      maintained architecture and operational documentation
 .agents/skills/            narrowly routed project workflows
 ```
@@ -279,7 +288,7 @@ an outage beyond retention, early capacity eviction, or an agent restart leaves 
 These intervals illustrate the protocol, not mandatory collection settings. Collection and snapshot
 reads continue during Pulse or local PostgreSQL outages and must not affect the serving VPN core.
 
-When implemented, verify scope labeling, missing permissions, stale/partial samples, counter resets,
+Verify scope labeling, missing permissions, stale/partial samples, counter resets,
 probe cancellation/timeouts, and database/Pulse outages using local fixtures and disposable targets.
 Also verify catch-up pagination, retry deduplication, atomic import/cursor recovery, concurrent polls,
 time/count/byte eviction, agent-run changes, and explicit gaps. Check that snapshot reads never wait

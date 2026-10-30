@@ -12,9 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = "pulse-vpn-node-users-test"
-COMPOSE = ["docker", "compose", "-p", PROJECT,
-           "-f", "deploy/compose.reality-test.yaml",
-           "-f", "deploy/compose.users-test.yaml"]
+COMPOSE = ["docker", "compose", "--env-file", "/dev/null", "-p", PROJECT,
+           "-f", "compose.yaml", "-f", "tests/integration/compose.yaml"]
 
 
 def command(args, *, timeout=180):
@@ -116,7 +115,7 @@ def main():
             if line.startswith("PASS: "):
                 print(line, flush=True)
     finally:
-        command(COMPOSE + ["down", "--volumes", "--remove-orphans"])
+        command(COMPOSE + ["--profile", "test", "down", "--volumes", "--remove-orphans"])
 
 
 if __name__ == "__main__":

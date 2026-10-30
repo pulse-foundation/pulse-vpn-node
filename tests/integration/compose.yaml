@@ -1,5 +1,5 @@
-name: pulse-vpn-node-reality-test
-
+# Overlay on the root compose.yaml, used by every smoke runner.
+# Only fixtures, test peers and isolation differ from the complete node.
 x-client: &client
   image: metacubex/mihomo:v1.19.33@sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c
   user: "10001:10001"
@@ -8,7 +8,7 @@ x-client: &client
   read_only: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
-  networks: [front]
+  networks: [default]
   depends_on:
     node:
       condition: service_healthy
@@ -17,7 +17,7 @@ services:
   generate:
     image: pulse-vpn-node-reality-lab:local
     build:
-      context: ..
+      context: .
       dockerfile: tests/integration/realitylab/Dockerfile
     user: "0:0"
     command: [generate]
@@ -40,35 +40,56 @@ services:
       timeout: 2s
       retries: 15
 
+  database:
+    environment:
+      POSTGRES_USER: pulse_test
+      POSTGRES_DB: pulse_test
+      POSTGRES_PASSWORD_FILE: /fixtures/postgres-password
+    secrets: !reset []
+    volumes: ["fixtures:/fixtures:ro"]
+    restart: "no"
+    networks: [back]
+    depends_on:
+      generate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pulse_test -d pulse_test"]
+
+  migrate:
+    image: pulse-vpn-node:integration-test
+    environment:
+      PULSE_NODE_TOKEN_FILE: /fixtures/api-token
+      PULSE_NODE_DATABASE_URL_FILE: /fixtures/database-url
+    secrets: !reset []
+    volumes: ["fixtures:/fixtures:ro"]
+    networks: [back]
+
   node:
-    image: pulse-vpn-node:reality-test
+    image: pulse-vpn-node:integration-test
     build:
-      context: ..
+      context: .
       target: runtime
     environment:
       PULSE_NODE_TOKEN_FILE: /fixtures/api-token
       PULSE_NODE_VLESS_FILE: /fixtures/server.json
+      PULSE_NODE_DATABASE_URL_FILE: /fixtures/database-url
+      PULSE_NODE_TELEMETRY_FILE: /fixtures/telemetry.json
+      SSL_CERT_FILE: /fixtures/target.crt
+    secrets: !reset []
+    ports: !reset []
     volumes: ["fixtures:/fixtures:ro"]
-    tmpfs:
-      - /run/pulse-node:rw,noexec,nosuid,size=16m,mode=0700,uid=10001,gid=10001
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    mem_limit: 128m
-    stop_grace_period: 15s
-    networks: [front, back]
+    restart: "no"
+    networks: [default, back]
     depends_on:
       target:
         condition: service_healthy
-    healthcheck:
-      test: [CMD, pulse-vpn-node, healthcheck]
-      interval: 2s
-      timeout: 4s
-      retries: 15
 
   client:
     <<: *client
     command: [-d, /tmp/client, -f, /fixtures/client.json]
+  second:
+    <<: *client
+    command: [-d, /tmp/client, -f, /fixtures/second.json]
   bad-uuid:
     <<: *client
     command: [-d, /tmp/client, -f, /fixtures/bad-uuid.json]
@@ -79,16 +100,23 @@ services:
   probe:
     image: pulse-vpn-node-reality-lab:local
     command: [probe]
-    volumes: ["fixtures:/fixtures:ro"]
+    volumes:
+      - fixtures:/fixtures:ro
+      - traffic-baseline:/traffic-baseline
+      - telemetry-baseline:/telemetry-baseline
     read_only: true
     cap_drop: [ALL]
-    networks: [front]
+    networks: [default]
     profiles: [test]
 
+# No developer secrets, published ports or external routes in the lab.
+secrets: !reset {}
 networks:
-  front:
+  default:
     internal: true
   back:
     internal: true
 volumes:
   fixtures:
+  traffic-baseline:
+  telemetry-baseline:

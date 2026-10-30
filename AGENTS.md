@@ -1,7 +1,7 @@
 # Pulse VPN Node Agent Instructions
 
-This is the public GPLv3 server component for Pulse VPN. The current implementation is a minimal
-Go agent with VLESS + REALITY and optional PostgreSQL-backed live user management. A documented future
+This is the public GPLv3 server component for Pulse VPN. The current implementation is a Go
+agent with VLESS + REALITY, PostgreSQL-backed live users/traffic and buffered telemetry. A documented future
 directory or command is not evidence of implementation.
 Follow the checkout and current user request. Keep documentation-only work free of application code.
 
@@ -12,6 +12,9 @@ Follow the checkout and current user request. Keep documentation-only work free 
   Keep core-specific configuration and controller details in the adapter. Mihomo is the only implemented
   adapter; adding alternative cores or changing protocols requires explicit scope and compatibility tests.
 - The deployment baseline is one agent + Mihomo container and a separate PostgreSQL Compose service.
+  Root `compose.yaml` launches the full node with migrations; `compose.dev.yaml` contains development
+  differences. Keep disposable test peers in `tests/integration/compose.yaml`, inheriting the main
+  runtime services. Do not reintroduce per-feature deployment overlays or duplicate the runtime stack.
   The agent manages its own child, not the Docker daemon or the VPS operating system.
 - Pulse VPN remains the separate private control panel. Clients connect directly to this node.
   Do not copy private Pulse code, credentials, fixtures, or infrastructure details into this repository.

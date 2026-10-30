@@ -35,32 +35,16 @@ serving, a database outage must not stop the core; management returns 503 and re
 Use one node process per database. Running multiple agents against the same database is unsupported:
 SQL transactions serialize desired state, but no distributed runtime ownership lease is implemented.
 
-The local `deploy/compose.managed.yaml` overlay provides a separate private PostgreSQL service,
-persistent database volume and explicit `migrate` service. The database has no host port. Prepare
-these files under a host-private `.local/` directory (mode 0700):
+The root `compose.yaml` includes the private PostgreSQL service, persistent `node_database` volume,
+and explicit `migrate` service. See the [README](../README.md#configure-a-persistent-node) for the
+single setup path and secret files. Local development adds only `compose.dev.yaml`; no user-management
+overlay is needed. PostgreSQL has no host port.
 
-- `api-token`: the existing token from the README.
-- `database-password`: a generated database password.
-- `database-url`: matching URL for `pulse_node` database/user at `database:5432`, with the password
-  URL-encoded and `sslmode=disable` only for this private local Compose network.
-- `vless.json`: validated transport settings described in [local REALITY](local-reality.md), listening
-  on `0.0.0.0:8443`. Its users are initial seed data only.
-
-Container UID 10001 must be able to read its secret files. For local bind-based Compose secrets, files
-may be mode 0644 inside the private 0700 parent directory; never loosen the parent or commit files.
-Protect database volumes/backups: UUIDs are recoverable credentials stored in the private database,
-without application-layer encryption. The REALITY private key remains in the mounted VLESS file.
-
-```sh
-docker compose -f deploy/compose.yaml -f deploy/compose.managed.yaml build node
-docker compose -f deploy/compose.yaml -f deploy/compose.managed.yaml up --wait
-```
-
-The API and VPN ports are loopback-only, 18080 and 18443. Migration executes reviewed embedded
-`internal/postgres/migrations/001_users.sql` transactionally and verifies recorded checksums. Normal
-agent startup never creates schema. Future changes need new versioned migrations. Do not remove the
-database volume to restart a node. Initial users are imported atomically exactly once; later file edits
-do not reset users or re-enable disabled identities. Transport changes still require an agent restart.
+Migration applies reviewed embedded SQL (`001_users.sql`, `002_traffic.sql`) transactionally and
+verifies recorded checksums. Normal agent startup never creates schema. Future changes need new
+versioned migrations. Do not remove the database volume to restart a node. Initial users are imported
+atomically exactly once; later file edits do not reset users or re-enable disabled identities.
+Transport changes still require an agent restart.
 
 ## Authenticated API
 
@@ -104,5 +88,5 @@ Mihomo closes tracked outbound UDP state but may retain an authenticated inbound
 The generated configuration therefore also authorizes egress by exact active `IN-USER` rules with a
 terminal `REJECT`; revoked identities cannot recreate working outbound flows after cleanup. The
 configured REALITY handshake target alone uses explicit `proxy: DIRECT`. Hidden parent connections
-may remain physically open; this is access denial, not proof of transport drain. Transport, quota
-and traffic accounting APIs are absent.
+may remain physically open; this is access denial, not proof of transport drain. Transport and quota APIs are absent. Approximate traffic totals are available through
+`GET /api/v1/traffic`; see [traffic accounting](traffic.md).

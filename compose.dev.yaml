@@ -1,0 +1,13 @@
+# docker compose -f compose.yaml -f compose.dev.yaml up --build --wait
+# Requires Compose >= 2.24.4: replace ports rather than also exposing the VPS port.
+services:
+  node:
+    build:
+      context: .
+      target: runtime
+    ports: !override
+      - "127.0.0.1:${PULSE_NODE_PORT:-18080}:8080"
+      - "127.0.0.1:${PULSE_NODE_VPN_PORT:-18443}:8443"
+    restart: "no"
+  database:
+    restart: "no"

@@ -1,0 +1,83 @@
+# Complete Linux node. Build locally with compose.dev.yaml or supply PULSE_NODE_IMAGE.
+name: pulse-vpn-node
+services:
+  database:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: pulse_node
+      POSTGRES_DB: pulse_node
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets: [database_password]
+    volumes: ["node_database:/var/lib/postgresql/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pulse_node -d pulse_node"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: ${PULSE_NODE_IMAGE:-pulse-vpn-node:local}
+    command: [migrate]
+    environment:
+      PULSE_NODE_TOKEN_FILE: /run/secrets/node_api_token
+      PULSE_NODE_DATABASE_URL_FILE: /run/secrets/node_database_url
+    secrets: [node_api_token, node_database_url]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_healthy
+
+  node:
+    image: ${PULSE_NODE_IMAGE:-pulse-vpn-node:local}
+    environment:
+      PULSE_NODE_TOKEN_FILE: /run/secrets/node_api_token
+      PULSE_NODE_VLESS_FILE: /run/secrets/node_vless
+      PULSE_NODE_DATABASE_URL_FILE: /run/secrets/node_database_url
+      PULSE_NODE_TELEMETRY_FILE: /run/secrets/node_telemetry
+    secrets: [node_api_token, node_vless, node_database_url, node_telemetry]
+    ports:
+      - "127.0.0.1:${PULSE_NODE_PORT:-18080}:8080"
+      - "${PULSE_NODE_VPN_BIND:-0.0.0.0}:${PULSE_NODE_VPN_PORT:-443}:8443"
+    volumes:
+      # Native Linux host; on Docker Desktop these describe its Linux VM.
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+      - /proc/uptime:/host/proc/uptime:ro
+      - /proc/diskstats:/host/proc/diskstats:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /run/pulse-node:rw,noexec,nosuid,size=16m,mode=0700,uid=10001,gid=10001
+    mem_limit: 128m
+    pids_limit: 64
+    stop_grace_period: 15s
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, /usr/local/bin/pulse-vpn-node, healthcheck]
+      interval: 5s
+      timeout: 4s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+secrets:
+  node_api_token:
+    file: ${PULSE_NODE_CONFIG_DIR:-./.local}/api-token
+  database_password:
+    file: ${PULSE_NODE_CONFIG_DIR:-./.local}/database-password
+  node_database_url:
+    file: ${PULSE_NODE_CONFIG_DIR:-./.local}/database-url
+  node_vless:
+    file: ${PULSE_NODE_CONFIG_DIR:-./.local}/vless.json
+  node_telemetry:
+    file: ${PULSE_NODE_TELEMETRY_CONFIG:-./deploy/telemetry.example.json}
+volumes:
+  node_database:

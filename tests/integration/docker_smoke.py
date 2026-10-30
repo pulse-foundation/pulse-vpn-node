@@ -1,22 +1,18 @@
-"""Exercise this project's real local image, without production services or VPN fixtures."""
+"""Exercise lifecycle/auth using the complete disposable node lab; no host ports."""
 
 import json
-import os
 from pathlib import Path
 import subprocess
 import time
-import urllib.error
-import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PORT = int(os.environ.get("PULSE_NODE_SMOKE_PORT", "18081"))
-ENV = {**os.environ, "PULSE_NODE_PORT": str(PORT)}
-COMPOSE = ["docker", "compose", "-p", "pulse-vpn-node-smoke", "-f", "deploy/compose.yaml"]
+COMPOSE = ["docker", "compose", "--env-file", "/dev/null", "-p", "pulse-vpn-node-smoke",
+           "-f", "compose.yaml", "-f", "tests/integration/compose.yaml"]
 
 
 def command(args, *, check=True):
-    return subprocess.run(args, cwd=ROOT, env=ENV, text=True, capture_output=True,
+    return subprocess.run(args, cwd=ROOT, text=True, capture_output=True,
                           check=check, timeout=120)
 
 
@@ -35,32 +31,27 @@ def wait_exited(container):
 
 
 def main():
-    token = (ROOT / ".local/api-token").read_text().strip()
     if command(COMPOSE + ["ps", "-a", "-q"]).stdout.strip():
         raise RuntimeError("smoke project already exists; inspect it before running this test")
     try:
-        command(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "45", "--no-build"])
+        subprocess.run(COMPOSE + ["build", "generate", "node"], cwd=ROOT,
+                       check=True, timeout=600)
+        command(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "90", "node"])
         cid = command(COMPOSE + ["ps", "-q", "node"]).stdout.strip()
         assert inspect(cid)["State"]["Health"]["Status"] == "healthy"
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        url = f"http://127.0.0.1:{PORT}/api/v1/status"
-        for headers in [{}, {"Authorization": "Bearer wrong"}]:
-            try:
-                opener.open(urllib.request.Request(url, headers=headers), timeout=5)
-            except urllib.error.HTTPError as exc:
-                assert exc.code == 401
-            else:
-                raise AssertionError("unauthorized request accepted")
-        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
-        with opener.open(req, timeout=5) as response:
-            status = json.load(response)
-        assert status == {"status": "ready", "vpnConfigured": False,
+        token = command(COMPOSE + ["exec", "-T", "node", "cat", "/fixtures/api-token"]).stdout.strip()
+        for headers in [[], ["--header", "Authorization: Bearer wrong"]]:
+            response = command(COMPOSE + ["exec", "-T", "node", "wget", "-S", "-O", "/dev/null"]
+                               + headers + ["http://127.0.0.1:8080/api/v1/status"], check=False)
+            assert response.returncode != 0 and "401 Unauthorized" in response.stderr
+        status = json.loads(command(COMPOSE + ["exec", "-T", "node", "pulse-vpn-node", "status"]).stdout)
+        assert status == {"status": "ready", "vpnConfigured": True,
                           "core": {"version": "v1.19.33"}}
         print("PASS: real pinned core, healthcheck and API authentication")
 
         command(COMPOSE + ["exec", "-T", "node", "sh", "-c", 'kill -KILL "$(pidof mihomo)"'])
         assert wait_exited(cid)["ExitCode"] != 0
-        command(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "45", "--no-build"])
+        command(COMPOSE + ["up", "-d", "--no-deps", "--wait", "--wait-timeout", "45", "node"])
         print("PASS: unexpected core exit fails agent; explicit restart recovers")
 
         failed = command(COMPOSE + ["run", "--rm", "--no-deps", "-e",
@@ -76,7 +67,7 @@ def main():
         assert token not in logs
         print("PASS: graceful SIGTERM shutdown; API token absent from logs")
     finally:
-        command(COMPOSE + ["down", "--remove-orphans"])
+        command(COMPOSE + ["--profile", "test", "down", "--volumes", "--remove-orphans"])
 
 
 if __name__ == "__main__":

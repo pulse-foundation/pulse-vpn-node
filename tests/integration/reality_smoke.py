@@ -5,8 +5,8 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPOSE = ["docker", "compose", "-p", "pulse-vpn-node-reality-test",
-           "-f", "deploy/compose.reality-test.yaml"]
+COMPOSE = ["docker", "compose", "--env-file", "/dev/null", "-p", "pulse-vpn-node-reality-test",
+           "-f", "compose.yaml", "-f", "tests/integration/compose.yaml"]
 
 
 def command(args, *, check=True, timeout=180):
@@ -53,7 +53,7 @@ def main():
         probe("reject-stopped-node")
         print("PASS: stopping the node prevents transfer; no direct fallback", flush=True)
     finally:
-        command(COMPOSE + ["down", "--volumes", "--remove-orphans"])
+        command(COMPOSE + ["--profile", "test", "down", "--volumes", "--remove-orphans"])
 
 
 if __name__ == "__main__":

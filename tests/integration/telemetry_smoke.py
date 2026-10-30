@@ -13,10 +13,8 @@ import subprocess
 import users_smoke as lab
 
 lab.PROJECT = "pulse-vpn-node-telemetry-test"
-lab.COMPOSE = ["docker", "compose", "-p", lab.PROJECT,
-               "-f", "deploy/compose.reality-test.yaml",
-               "-f", "deploy/compose.users-test.yaml",
-               "-f", "deploy/compose.telemetry-test.yaml"]
+lab.COMPOSE = ["docker", "compose", "--env-file", "/dev/null", "-p", lab.PROJECT,
+               "-f", "compose.yaml", "-f", "tests/integration/compose.yaml"]
 
 
 def main():
@@ -48,7 +46,7 @@ def main():
             if line.startswith("PASS: "):
                 print(line, flush=True)
     finally:
-        lab.command(lab.COMPOSE + ["down", "--volumes", "--remove-orphans"])
+        lab.command(lab.COMPOSE + ["--profile", "test", "down", "--volumes", "--remove-orphans"])
 
 
 if __name__ == "__main__":

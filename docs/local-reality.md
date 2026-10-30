@@ -1,8 +1,8 @@
 # Local VLESS + REALITY
 
 The agent supports one VLESS listener over raw TCP, with REALITY and `xtls-rprx-vision` for every
-configured user. Server and test client use unmodified Mihomo v1.19.33. This is a local startup
-configuration mode. Optional [live users](live-users.md) adds PostgreSQL-backed management.
+configured user. Server and test client use unmodified Mihomo v1.19.33. The standard Compose
+launch includes PostgreSQL-backed [live users](live-users.md); direct file-only startup also remains supported.
 
 ## Reproducible connection test
 
@@ -17,7 +17,7 @@ short IDs and a local TLS certificate, and runs this path:
 
 ```text
 probe → Mihomo client → agent-managed Mihomo server → local target
-        front network  [front + back networks]       back network
+        default network [default + back networks]       back network
 ```
 
 Both networks are Docker `internal` networks. No port is published to the host; no public TLS target,
@@ -35,7 +35,7 @@ The script removes its own project and credential volume even on failure. If int
 inspect and remove only this project before rerunning:
 
 ```sh
-docker compose -p pulse-vpn-node-reality-test -f deploy/compose.reality-test.yaml down --volumes --remove-orphans
+docker compose -p pulse-vpn-node-reality-test -f compose.yaml -f tests/integration/compose.yaml --profile test down --volumes --remove-orphans
 ```
 
 These checks establish local core compatibility, not VPS reachability, resistance to filtering,
@@ -45,8 +45,9 @@ YouTube/QUIC behavior, or compatibility with a particular mobile app build. The 
 ## Startup settings
 
 Set `PULSE_NODE_VLESS_FILE` to a read-only mounted JSON file readable by container UID 10001. Protect
-the parent directory and file; never commit or print it. The default `deploy/compose.yaml` remains
-idle and does not mount this optional file or expose a VPN port. The test Compose shows the wiring.
+the parent directory and file; never commit or print it. The root `compose.yaml` mounts
+`.local/vless.json` and publishes VPN TCP 443; `compose.dev.yaml` replaces that with loopback 18443.
+Both map to container port 8443. See the [README](../README.md) for startup and secret preparation.
 
 The file is at most 64 KiB and contains one JSON object. Unknown fields and trailing documents fail
 startup. Required fields are:
@@ -65,7 +66,9 @@ The matching client needs the user's UUID, derived public key, one short ID, an 
 the node address/port, TLS, Vision, and raw TCP. The local fixture generator demonstrates that mapping
 without storing reusable credentials in Git. The agent does not issue/export client profiles yet.
 
-Editing the file has no effect until the agent is explicitly restarted. Invalid settings fail startup
+Transport file edits require an explicit restart. With PostgreSQL, the file
+seeds users only once; later user changes go through the API. Without PostgreSQL, all file edits
+require a restart. Invalid settings fail startup
 instead of enabling plaintext VLESS or silently starting idle. `vpnConfigured` reports supplied VPN
 settings; readiness checks controller version, child ownership of the listening socket, and TCP
 reachability, not REALITY authentication or

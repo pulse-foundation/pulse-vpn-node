@@ -17,6 +17,7 @@ import (
 )
 
 type Options struct {
+	Idle        bool
 	Dir         string
 	Destination string
 	ServerNames []string
@@ -68,6 +69,9 @@ func Init(o Options) (Result, error) {
 
 func prepare(o Options, existing map[string][]byte) (map[string][]byte, error) {
 	pending := make(map[string][]byte)
+	if o.Idle && (o.Listen != "" || o.Port != 0 || o.Destination != "" || o.ServerNames != nil) {
+		return nil, errors.New("idle initialization cannot include transport settings")
+	}
 	if raw := existing["api-token"]; raw != nil {
 		if _, err := config.ParseToken(raw); err != nil {
 			return nil, errors.New("invalid existing api-token")
@@ -83,11 +87,20 @@ func prepare(o Options, existing map[string][]byte) (map[string][]byte, error) {
 		if err != nil {
 			return nil, errors.New("invalid existing vless.json")
 		}
-		if (o.Listen != "" && o.Listen != vpn.Listen) || (o.Port != 0 && o.Port != vpn.Port) ||
+		if vpn == nil {
+			if o.Listen != "" || o.Port != 0 || o.Destination != "" || o.ServerNames != nil {
+				return nil, errors.New("idle settings cannot be configured by init; create the connection through the API")
+			}
+		} else if (o.Listen != "" && o.Listen != vpn.Listen) || (o.Port != 0 && o.Port != vpn.Port) ||
 			(o.Destination != "" && o.Destination != vpn.Reality.Destination) ||
 			(o.ServerNames != nil && !slices.Equal(o.ServerNames, vpn.Reality.ServerNames)) {
 			return nil, errors.New("requested transport settings conflict with existing vless.json; init does not update settings")
 		}
+	} else if o.Idle {
+		if o.Listen != "" || o.Port != 0 || o.Destination != "" || o.ServerNames != nil {
+			return nil, errors.New("idle initialization cannot include transport settings")
+		}
+		pending["vless.json"] = []byte("null\n")
 	} else {
 		listen, port := o.Listen, o.Port
 		if listen == "" {

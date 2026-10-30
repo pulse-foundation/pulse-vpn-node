@@ -67,7 +67,8 @@ the node address/port, TLS, Vision, and raw TCP. The local fixture generator dem
 without storing reusable credentials in Git. The agent does not issue/export client profiles yet.
 
 Transport file edits require an explicit restart. With PostgreSQL, the file
-seeds users only once; later user changes go through the API. Without PostgreSQL, all file edits
+seeds connection and users only once; subsequent managed state comes from SQL and API commands.
+JSON `null` supports managed idle startup before creating the connection through the API. Without PostgreSQL, all file edits
 require a restart. Invalid settings fail startup
 instead of enabling plaintext VLESS or silently starting idle. `vpnConfigured` reports supplied VPN
 settings; readiness checks controller version, child ownership of the listening socket, and TCP

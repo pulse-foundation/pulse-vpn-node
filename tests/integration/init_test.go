@@ -14,7 +14,7 @@ import (
 
 // initialize exercises the published image entrypoint and the unmodified deployment
 // Compose, rather than the test overlay's pre-generated credentials.
-func (s *suite) initialize(t *testing.T, project string) {
+func (s *suite) initialize(t *testing.T, project string, idle bool) {
 	s.prepare(t)
 	s.clean(t, project)
 	dir := t.TempDir()
@@ -34,8 +34,13 @@ func (s *suite) initialize(t *testing.T, project string) {
 	initArgs := []string{"run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges:true", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"--mount", "type=bind,src=" + dir + ",dst=/config", nodeImage, "init", "--config-dir", "/config"}
-	summary := decode[struct{ Created, Preserved []string }](t, local.docker(t, append(append([]string{}, initArgs...),
-		"--reality-destination", "target.test:443", "--reality-server-names", "target.test")...))
+	freshArgs := append([]string{}, initArgs...)
+	if idle {
+		freshArgs = append(freshArgs, "--idle")
+	} else {
+		freshArgs = append(freshArgs, "--reality-destination", "target.test:443", "--reality-server-names", "target.test")
+	}
+	summary := decode[struct{ Created, Preserved []string }](t, local.docker(t, freshArgs...))
 	need(t, len(summary.Created) == 4 && len(summary.Preserved) == 0, "fresh init did not create four files")
 	before := map[string][]byte{}
 	for _, name := range []string{"api-token", "database-password", "database-url", "vless.json"} {
@@ -50,15 +55,15 @@ func (s *suite) initialize(t *testing.T, project string) {
 		need(t, err == nil && bytes.Equal(after, raw), "repeat init changed "+name)
 	}
 	failed := local.run(time.Minute, append(append([]string{}, initArgs...), "--port", "443")...)
-	need(t, failed.expectedFailure("conflict"), "init conflict was not rejected")
+	message := "conflict"
+	if idle {
+		message = "idle settings"
+	}
+	need(t, failed.expectedFailure(message), "init conflict was not rejected")
 	local.docker(t, compose("up", "-d", "--no-build", "--pull", "missing", "--wait", "--wait-timeout", "120")...)
-	status := decode[struct {
-		Status        string
-		VPNConfigured bool
-		Core          struct{ Version string }
-	}](t,
-		local.docker(t, compose("exec", "-T", "node", "pulse-vpn-node", "status")...))
-	need(t, status.Status == "ready" && status.VPNConfigured && status.Core.Version == "v1.19.33", "initialized standard node is not ready")
+	waitNodeConfigured(t, func() string {
+		return local.docker(t, compose("exec", "-T", "node", "pulse-vpn-node", "status")...)
+	}, !idle)
 	logs := local.docker(t, compose("logs", "--no-color", "node", "migrate")...)
 	for _, name := range []string{"api-token", "database-password"} {
 		need(t, !strings.Contains(logs, strings.TrimSpace(string(before[name]))), "secret leaked into runtime logs")

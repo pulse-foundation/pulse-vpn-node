@@ -93,6 +93,9 @@ services:
   bad-uuid:
     <<: *client
     command: [-d, /tmp/client, -f, /fixtures/bad-uuid.json]
+  replacement:
+    <<: *client
+    command: [-d, /tmp/client, -f, /fixtures/replacement.json]
   bad-key:
     <<: *client
     command: [-d, /tmp/client, -f, /fixtures/bad-key.json]
@@ -111,6 +114,15 @@ services:
     depends_on:
       database:
         condition: service_healthy
+
+  configure:
+    image: pulse-vpn-node-reality-lab:local
+    command: [managed-configure]
+    volumes: ["fixtures:/fixtures"]
+    read_only: true
+    cap_drop: [ALL]
+    networks: [default]
+    profiles: [test]
 
   probe:
     image: pulse-vpn-node-reality-lab:local

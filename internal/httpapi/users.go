@@ -68,6 +68,46 @@ func userRoutes(mux *http.ServeMux, manager *node.UserManager) {
 		w.Header().Set("Location", "/api/v1/operations/"+strconv.FormatInt(operation.Revision, 10))
 		writeJSON(w, http.StatusAccepted, operation)
 	})
+	for _, route := range []struct{ pattern, kind string }{{"DELETE /api/v1/users/{name}", "delete"}, {"POST /api/v1/users/{name}/rotate", "rotate"}} {
+		mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
+			if unavailable(w) {
+				return
+			}
+			if len(r.Header.Values("Idempotency-Key")) != 1 {
+				userError(w, node.ErrInvalid)
+				return
+			}
+			var body struct {
+				ExpectedRevision *int64  `json:"expectedRevision"`
+				UUID             *string `json:"uuid"`
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if decoder.Decode(&body) != nil {
+				userError(w, node.ErrInvalid)
+				return
+			}
+			var extra any
+			if decoder.Decode(&extra) != io.EOF || body.ExpectedRevision == nil || (route.kind == "delete" && body.UUID != nil) || (route.kind == "rotate" && (body.UUID == nil || *body.UUID == "")) {
+				userError(w, node.ErrInvalid)
+				return
+			}
+			uuid := ""
+			if body.UUID != nil {
+				uuid = *body.UUID
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			operation, err := manager.Change(ctx, node.UserChange{Kind: route.kind, Key: r.Header.Get("Idempotency-Key"), Name: r.PathValue("name"), UUID: uuid, ExpectedRevision: *body.ExpectedRevision})
+			if err != nil {
+				userError(w, err)
+				return
+			}
+			w.Header().Set("Location", "/api/v1/operations/"+strconv.FormatInt(operation.Revision, 10))
+			writeJSON(w, http.StatusAccepted, operation)
+		})
+	}
 	mux.HandleFunc("GET /api/v1/operations/{revision}", func(w http.ResponseWriter, r *http.Request) {
 		if unavailable(w) {
 			return

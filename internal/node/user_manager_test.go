@@ -146,3 +146,50 @@ func TestPendingResultWriteBlocksNewApplyButContinuesCleanup(t *testing.T) {
 		t.Fatal("pending result write stopped existing revocation cleanup")
 	}
 }
+
+type managedCore struct {
+	userCore
+	settings *VLESS
+	states   int
+}
+
+func (c *managedCore) ReservedPorts() []int { return []int{19090} }
+
+func (c *managedCore) ApplyState(_ context.Context, v *VLESS) error {
+	c.states++
+	c.settings = v
+	return c.applyErr
+}
+func TestOneWriterPublishesOnlyVerifiedConnectionSnapshot(t *testing.T) {
+	s := &memoryUsers{snapshot: UserSnapshot{Revision: 1, Managed: true}}
+	core := &managedCore{}
+	m := NewUserManager(s, core)
+	m.step(context.Background())
+	if m.Connection() != nil || m.Status().AppliedRevision != 1 || core.states != 1 {
+		t.Fatal("idle state not applied")
+	}
+	request := ConnectionChange{ListenPort: 8443}
+	request.Transport.Type = "raw"
+	request.Reality.Destination = "target.test:443"
+	request.Reality.ServerNames = []string{"target.test"}
+	settings, err := request.NewSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.snapshot = UserSnapshot{Revision: 2, Managed: true, Connection: settings, Users: []ManagedUser{{Name: "stable", RuntimeName: "credential", UUID: "f47ac10b-58cc-4372-a567-0e02b2c3d479", Enabled: true}}}
+	core.applyErr = errors.New("bind failed")
+	m.step(context.Background())
+	if m.Connection() != nil || m.Status().AppliedRevision != 1 {
+		t.Fatal("failed connection published")
+	}
+	core.applyErr = nil
+	m.step(context.Background())
+	if m.Connection() == nil || m.Status().AppliedRevision != 2 || core.settings == nil || len(core.settings.Users) != 1 || core.settings.Users[0].Name != "credential" || core.applies != 0 {
+		t.Fatal("connection and users not applied coherently through one writer")
+	}
+	public := m.Connection()
+	public.Reality.ShortIDs[0] = "changed"
+	if m.Connection().Reality.ShortIDs[0] == "changed" {
+		t.Fatal("public read mutated applied state")
+	}
+}

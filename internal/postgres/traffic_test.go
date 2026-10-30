@@ -344,7 +344,13 @@ func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
 	if _, err = s.pool.Exec(ctx, `INSERT INTO node_schema_migrations(version,checksum) VALUES(1,$1)`, sum[:]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Initialize(ctx, []node.User{{Name: "alice", UUID: testUUID}}); err != nil {
+	if _, err = s.pool.Exec(ctx, "INSERT INTO node_users(name,uuid,enabled) VALUES('alice',$1,true)", testUUID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.pool.Exec(ctx, "UPDATE node_user_state SET initialized=true,revision=1 WHERE singleton"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.pool.Exec(ctx, "INSERT INTO node_user_operations(revision,state) VALUES(1,'applied')"); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Migrate(ctx); err != nil {
@@ -355,13 +361,13 @@ func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
 	}
 	assertTraffic(t, s, 0, 0, 0, 0)
 	var newest int
-	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 2 {
+	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 3 {
 		t.Fatalf("migration version %d %v", newest, err)
 	}
 }
 
 func TestMigrationRejectsUnknownAndGappedHistory(t *testing.T) {
-	for _, version := range []int{3, 0} {
+	for _, version := range []int{4, 0} {
 		t.Run(string(rune('0'+version)), func(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()

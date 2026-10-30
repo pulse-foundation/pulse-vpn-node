@@ -31,12 +31,15 @@ func ParseVLESS(raw []byte) (*node.VLESS, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var vpn *node.VLESS
-	if err := dec.Decode(&vpn); err != nil || vpn == nil {
+	if err := dec.Decode(&vpn); err != nil {
 		return nil, errors.New("invalid VLESS settings JSON")
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		return nil, errors.New("unexpected data after VLESS settings")
+	}
+	if vpn == nil {
+		return nil, nil
 	}
 	if err := vpn.Validate(); err != nil {
 		return nil, err

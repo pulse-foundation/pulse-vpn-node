@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -21,17 +22,45 @@ type UsersView struct {
 // UserManager has one application-owned writer. API calls only commit intent;
 // polling and retries survive the lifetime of any individual HTTP request.
 type UserManager struct {
-	store    UserStore
-	runtime  UserRuntime
-	mu       sync.RWMutex
-	status   UserRuntimeStatus
-	applied  UserSnapshot // writer-owned; never exposed to HTTP callers
-	cleanup  UserSnapshot // latest attempted intent, including an uncertain reload
-	recorded bool
+	reservedPorts []int
+	store         UserStore
+	runtime       UserRuntime
+	mu            sync.RWMutex
+	status        UserRuntimeStatus
+	applied       UserSnapshot // writer-owned; never exposed to HTTP callers
+	cleanup       UserSnapshot // latest attempted intent, including an uncertain reload
+	connection    *Connection  // protected by mu, verified applied public state
+	recorded      bool
 }
 
-func NewUserManager(store UserStore, runtime UserRuntime) *UserManager {
-	return &UserManager{store: store, runtime: runtime, status: UserRuntimeStatus{CleanupState: "pending"}}
+func NewUserManager(store UserStore, runtime UserRuntime, reservedPorts ...int) *UserManager {
+	return &UserManager{reservedPorts: slices.Clone(reservedPorts), store: store, runtime: runtime, status: UserRuntimeStatus{CleanupState: "pending"}}
+}
+func (m *UserManager) Managed() bool { _, ok := m.store.(ManagedStore); return ok }
+func (m *UserManager) Connection() *Connection {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.connection == nil {
+		return nil
+	}
+	c := *m.connection
+	c.Reality.ServerNames = append([]string(nil), c.Reality.ServerNames...)
+	c.Reality.ShortIDs = append([]string(nil), c.Reality.ShortIDs...)
+	return &c
+}
+func (m *UserManager) CreateConnection(ctx context.Context, c ConnectionChange) (Operation, error) {
+	store, ok := m.store.(ManagedStore)
+	if !ok {
+		return Operation{}, ErrUnavailable
+	}
+	runtime, ok := m.runtime.(ManagedRuntime)
+	if !ok {
+		return Operation{}, ErrUnavailable
+	}
+	if slices.Contains(m.reservedPorts, c.ListenPort) || slices.Contains(runtime.ReservedPorts(), c.ListenPort) {
+		return Operation{}, ErrInvalid
+	}
+	return store.CreateConnection(ctx, c)
 }
 func (m *UserManager) Status() UserRuntimeStatus {
 	m.mu.RLock()
@@ -96,7 +125,22 @@ func (m *UserManager) step(ctx context.Context) bool {
 			m.status.ApplyingRevision = snapshot.Revision
 			m.mu.Unlock()
 			applyCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			err = m.runtime.ApplyUsers(applyCtx, snapshot.Active())
+			if snapshot.Managed {
+				runtime, ok := m.runtime.(ManagedRuntime)
+				if !ok {
+					err = ErrUnavailable
+				} else {
+					var settings *VLESS
+					if snapshot.Connection != nil {
+						v := *snapshot.Connection
+						v.Users = snapshot.Active()
+						settings = &v
+					}
+					err = runtime.ApplyState(applyCtx, settings)
+				}
+			} else {
+				err = m.runtime.ApplyUsers(applyCtx, snapshot.Active())
+			}
 			cancel()
 			if err != nil {
 				message = "user configuration application failed"
@@ -105,6 +149,10 @@ func (m *UserManager) step(ctx context.Context) bool {
 				cancel()
 			} else {
 				m.applied = snapshot
+				connection, _ := DescribeConnection(snapshot.Connection)
+				m.mu.Lock()
+				m.connection = connection
+				m.mu.Unlock()
 				m.recorded = false
 			}
 		}

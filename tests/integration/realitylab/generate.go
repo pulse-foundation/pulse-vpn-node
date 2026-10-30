@@ -52,6 +52,7 @@ func generate() error {
 	for _, tc := range []struct{ file, uuid, key string }{
 		{"client.json", id, pub}, {"second.json", secondID, pub}, {"bad-uuid.json", newUUID(), pub},
 		{"bad-key.json", id, base64.RawURLEncoding.EncodeToString(badKey.PublicKey().Bytes())},
+		{"replacement.json", newUUID(), pub},
 	} {
 		cfg := map[string]any{"mixed-port": 7890, "allow-lan": true, "bind-address": "0.0.0.0", "mode": "rule", "log-level": "silent", "ipv6": false, "find-process-mode": "off", "geo-auto-update": false,
 			"dns": map[string]any{"enable": false}, "profile": map[string]any{"store-selected": false, "store-fake-ip": false},

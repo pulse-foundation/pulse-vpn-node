@@ -2,18 +2,18 @@ openapi: 3.0.3
 info:
   title: Pulse VPN Node
   version: 0.1.0
-  description: Agent/core readiness with optional startup-configured VLESS + REALITY.
+  description: Agent/core readiness and managed single VLESS + REALITY connection with live users.
 security:
   - nodeToken: []
 paths:
   /api/v1/connection:
     get:
       operationId: getConnection
-      summary: Read the public startup VLESS connection descriptor
-      description: Immutable transport snapshot, independent of live users and readiness. No credentials or REALITY private key are returned.
+      summary: Read the public verified applied VLESS connection descriptor
+      description: Last verified applied transport snapshot, independent of live users. No credentials or REALITY private key are returned.
       responses:
         '200':
-          description: Validated startup listener, or explicit null when VPN is not configured
+          description: Verified applied listener, or explicit null when VPN is not configured
           content:
             application/json:
               schema:
@@ -55,7 +55,7 @@ paths:
                         properties:
                           publicKey:
                             type: string
-                            description: Unpadded base64url X25519 public key derived from the startup private key
+                            description: Unpadded base64url X25519 public key derived from the persisted connection private key
                           shortIds:
                             type: array
                             items:
@@ -68,6 +68,63 @@ paths:
           description: Missing or invalid bearer token
         '503':
           description: Invalid connection settings; no internal validation details returned
+    put:
+      operationId: createConnection
+      summary: Create the singleton raw VLESS connection on an idle managed node
+      description: Shares the users revision and serialized writer. Generates REALITY material once. Identical settings preserve secrets; divergent settings return 409. Conversion and additional listeners are unsupported.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, transport, listenPort, reality]
+              properties:
+                expectedRevision:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                transport:
+                  type: object
+                  additionalProperties: false
+                  required: [type]
+                  properties:
+                    type:
+                      type: string
+                      enum: [raw]
+                listenPort:
+                  description: Internal VPN port; the agent management and core controller ports are rejected before persistence.
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                reality:
+                  type: object
+                  additionalProperties: false
+                  required: [destination, serverNames]
+                  properties:
+                    destination:
+                      type: string
+                      description: REALITY target host and port
+                    serverNames:
+                      type: array
+                      minItems: 1
+                      maxItems: 16
+                      items:
+                        type: string
+      responses:
+        '202':
+          $ref: '#/components/responses/AcceptedOperation'
+        '400':
+          description: Invalid or unsupported transport/settings, or oversized input
+        '401':
+          description: Missing or invalid bearer token
+        '409':
+          description: Stale revision, divergent existing connection, or changed idempotent request
+        '503':
+          description: Managed connection state unavailable
   /api/v1/system/stats:
     get:
       operationId: getSystemStats
@@ -244,9 +301,79 @@ paths:
         '401':
           description: Missing or invalid bearer token
         '409':
-          description: Stale revision, identity conflict or reused idempotency key with changed body
+          description: Missing managed connection, stale revision, identity conflict or reused idempotency key with changed body
         '503':
           description: Management not configured or database unavailable; retry identical request and key
+    delete:
+      operationId: deleteUser
+      summary: Remove visible access while retaining revoked credentials and approximate accounting
+      parameters:
+        - $ref: '#/components/parameters/UserName'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties:
+                expectedRevision:
+                  type: integer
+                  format: int64
+                  minimum: 1
+      responses:
+        '202':
+          $ref: '#/components/responses/AcceptedOperation'
+        '400':
+          description: Invalid input
+        '401':
+          description: Missing or invalid bearer token
+        '404':
+          description: User not found
+        '409':
+          description: Stale revision or changed idempotent request
+        '503':
+          description: User management unavailable
+  /api/v1/users/{name}/rotate:
+    post:
+      operationId: rotateUserCredential
+      summary: Replace a user's credential, preserving enabled state and accounting
+      description: A retired UUID can never be reused. A retry with the current UUID preserves credentialRevision and returns a new shared operation revision.
+      parameters:
+        - $ref: '#/components/parameters/UserName'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, uuid]
+              properties:
+                expectedRevision:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                uuid:
+                  type: string
+                  format: uuid
+                  writeOnly: true
+      responses:
+        '202':
+          $ref: '#/components/responses/AcceptedOperation'
+        '400':
+          description: Invalid input
+        '401':
+          description: Missing or invalid bearer token
+        '404':
+          description: User missing or deleted
+        '409':
+          description: Stale revision, retired/duplicate credential, or changed idempotent request
+        '503':
+          description: User management unavailable
   /api/v1/operations/{revision}:
     get:
       operationId: getUserOperation
@@ -274,6 +401,33 @@ paths:
         '503':
           description: Management not configured or database unavailable
 components:
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    UserName:
+      in: path
+      name: name
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9_-]{1,64}$'
+  responses:
+    AcceptedOperation:
+      description: Durable intent accepted or original idempotent result; poll operation and current appliedRevision
+      headers:
+        Location:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserOperation'
   securitySchemes:
     nodeToken:
       type: http
@@ -498,14 +652,24 @@ components:
                 description: Destination to client payload bytes
     Status:
       type: object
-      required: [status, vpnConfigured, core]
+      required: [status, vpnConfigured, core, capabilities]
       properties:
         status:
           type: string
           enum: [ready, degraded]
         vpnConfigured:
           type: boolean
-          description: Whether validated VPN settings were supplied at startup; remains true when runtime health is degraded
+          description: Whether a connection has been locally verified applied; may remain true when health is degraded
+        capabilities:
+          type: object
+          required: [connectionCreate, userDelete, userRotate]
+          properties:
+            connectionCreate:
+              type: boolean
+            userDelete:
+              type: boolean
+            userRotate:
+              type: boolean
         core:
           type: object
           properties:
@@ -536,12 +700,17 @@ components:
           maxItems: 1024
           items:
             type: object
-            required: [name, enabled]
+            required: [name, enabled, credentialRevision]
             properties:
               name:
                 type: string
               enabled:
                 type: boolean
+              credentialRevision:
+                type: integer
+                format: int64
+                minimum: 1
+                description: Global revision that created the current credential, or baseline 1 for imported credentials; no credential material exposed
         runtime:
           type: object
           required: [appliedRevision, cleanupState]

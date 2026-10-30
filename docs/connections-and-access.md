@@ -1,7 +1,7 @@
 # Single VLESS Connection And Transport Selection
 
-Status: architectural direction only. The current implementation supports one VLESS/REALITY listener
-with raw TCP and Vision. XHTTP selection, transport management APIs and conversion are not implemented.
+Status: one VLESS/REALITY connection with raw TCP and Vision is implemented, including managed idle
+startup and revisioned singleton creation. XHTTP selection and conversion remain architectural direction.
 
 ## Cardinality And Ownership
 
@@ -57,7 +57,8 @@ Existing startup settings and managed users map to the raw TCP variant without r
 current user names as accounting identities, UUIDs, secret files, disabled state and historical totals.
 Use new reviewed migrations and a documented API/config transition when implementing persistence;
 never rewrite released migrations. Do not use transport names as user IDs or reset counters during
-conversion. This decision creates no new schema, exported API or empty implementation scaffolding.
+conversion. Managed creation uses migration `003_node_lifecycle.sql` and the shared operation revision stream.
+No conversion or XHTTP schema/API is implied.
 
 Before enabling XHTTP/conversion, test supported client/core combinations, actual bidirectional traffic,
 user creation and targeted revocation, unrelated-session behavior, traffic attribution, restart

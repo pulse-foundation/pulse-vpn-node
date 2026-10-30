@@ -164,8 +164,13 @@ func (s *suite) prepare(t *testing.T) {
 		s.docker(t, "image", "inspect", nodeImage, "pulse-vpn-node-reality-lab:local", "pulse-vpn-node:checks")
 	} else {
 		l := &lab{s, "pulse-vpn-node-storage-test"}
-		r := s.run(20*time.Minute, l.args("--profile", "test", "build", "node", "generate", "postgres-check")...)
-		need(t, r.err == nil, "image build/Go verification failed (output withheld)")
+		r := s.run(20*time.Minute, l.args("--profile", "test", "--progress", "plain", "build", "node", "generate", "postgres-check")...)
+		if r.err != nil {
+			// Build contexts exclude operator secrets; runtime fixtures do not exist yet.
+			// Keep runtime command output private, but retain bounded build diagnostics.
+			t.Logf("image build stdout:\n%s\nimage build stderr:\n%s", r.stdout, r.stderr)
+			t.Fatalf("image build/Go verification failed: %v", r.err)
+		}
 	}
 	s.imageID, s.prepared = s.image(t), true
 }

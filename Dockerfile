@@ -10,7 +10,9 @@ COPY internal ./internal
 COPY tests ./tests
 RUN test -z "$(gofmt -l cmd internal tests)" && go vet ./... && go test ./... && go test -race ./...
 RUN go vet -tags=integration ./tests/integration && go test -tags=integration -run '^$' ./tests/integration
-RUN CGO_ENABLED=0 go build -trimpath -o /out/pulse-vpn-node ./cmd/pulse-vpn-node
+ARG NODE_VERSION=dev
+ARG NODE_COMMIT=unknown
+RUN CGO_ENABLED=0 go build -ldflags="-X github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo.version=${NODE_VERSION} -X github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo.commit=${NODE_COMMIT}" -trimpath -o /out/pulse-vpn-node ./cmd/pulse-vpn-node
 
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
 COPY --from=check /out/pulse-vpn-node /usr/local/bin/pulse-vpn-node

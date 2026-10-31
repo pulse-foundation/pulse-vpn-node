@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo"
 	"io"
 	"log/slog"
 	"net"
@@ -24,6 +26,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		return json.NewEncoder(os.Stdout).Encode(buildinfo.Current())
+	}
 	if len(os.Args) > 1 && os.Args[1] == "init" {
 		return runInit(os.Args[2:], os.Stdout)
 	}
@@ -32,13 +37,16 @@ func run() error {
 		return err
 	}
 	if len(os.Args) > 1 {
+		if len(os.Args) == 2 && (os.Args[1] == "backup" || os.Args[1] == "restore" || os.Args[1] == "recovery-status") {
+			return runBackupCommand(cfg, os.Args[1], os.Stdin, os.Stdout)
+		}
 		if len(os.Args) == 2 && os.Args[1] == "migrate" {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			return app.Migrate(ctx, cfg)
 		}
 		if len(os.Args) != 2 || (os.Args[1] != "healthcheck" && os.Args[1] != "status") {
-			return errors.New("usage: pulse-vpn-node [init|healthcheck|status|migrate]")
+			return errors.New("usage: pulse-vpn-node [init|healthcheck|status|migrate|backup|restore|recovery-status]")
 		}
 		return check(cfg, os.Args[1] == "status")
 	}

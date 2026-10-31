@@ -332,6 +332,9 @@ func telemetryDependency(value float64, after telemetryStats) (telemetryStats, e
 	return telemetryStats{}, errors.New("dependency telemetry did not reflect database transition with new resource samples")
 }
 func liveTelemetry() error {
+	if err := telemetryDeliveryCheck(); err != nil {
+		return err
+	}
 	for _, path := range []string{"system/stats", "connectivity", "telemetry/samples"} {
 		for _, auth := range []string{"", "invalid"} {
 			if err := telemetryAPI(path, auth, 401, nil); err != nil {

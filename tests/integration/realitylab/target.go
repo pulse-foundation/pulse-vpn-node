@@ -14,7 +14,8 @@ func serveTarget() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.HandleFunc("POST /echo", func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(w, http.MaxBytesReader(w, r.Body, 2<<20)) })
-	failures := make(chan error, 6)
+	failures := make(chan error, 7)
+	go func() { failures <- serveTelemetryReceiver() }()
 	go func() {
 		s := &http.Server{Addr: ":8443", Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}
 		failures <- s.ListenAndServeTLS(filepath.Join(fixtureDir, "target.crt"), filepath.Join(fixtureDir, "target.key"))

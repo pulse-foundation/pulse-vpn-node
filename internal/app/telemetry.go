@@ -70,7 +70,6 @@ func (s *runtimeSampler) Sample(ctx context.Context) telemetry.Sample {
 	}
 	gauge("agent.uptime", "seconds", now.Sub(s.agentStart).Seconds())
 	gauge("core.uptime", "seconds", now.Sub(s.coreStart).Seconds())
-	gauge("core.restarts", "count", 0) // The current lifecycle exits on child death; it never restarts the child in-process.
 	readyCtx, cancel := context.WithTimeout(ctx, time.Second)
 	version, err := s.core.Ready(readyCtx)
 	cancel()

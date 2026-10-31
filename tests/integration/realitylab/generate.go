@@ -76,6 +76,9 @@ func generate() error {
 	}); err != nil {
 		return err
 	}
+	if err := writeJSON("telemetry-enrollment.json", map[string]any{"schemaVersion": 1, "endpoint": "https://target/api/v1/node-ingest", "enrollmentGeneration": newUUID(), "credential": randomHex(32)}); err != nil {
+		return err
+	}
 	if err := generateCertificate(); err != nil {
 		return err
 	}

@@ -48,6 +48,8 @@ type UserTotal struct {
 }
 
 type Totals struct {
+	AccountingEpoch    string      `json:"accountingEpoch"`
+	AccountingSequence int64       `json:"accountingSequence,string"`
 	ObservedAt         *time.Time  `json:"observedAt"`
 	Users              []UserTotal `json:"users"`
 	ResetCount         int64       `json:"resetCount,string"`

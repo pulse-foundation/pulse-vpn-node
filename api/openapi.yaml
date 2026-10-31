@@ -232,6 +232,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Status'
+  /api/v1/access-policy/events:
+    get:
+      operationId: getAccessPolicyEvents
+      summary: Read retained SQL expiry evidence, independently of telemetry retention
+      parameters:
+        - in: query
+          name: after
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: The next complete revision (at most 1024 users), or empty events. Persist the whole page before advancing after to its revision. Evidence has no TTL and survives deletion and renewal.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    maxItems: 1024
+                    items:
+                      type: object
+                      required: [revision, name, policyRevision, credentialRevision, enforcedAt]
+                      properties:
+                        revision: {type: integer, format: int64, minimum: 1}
+                        name: {type: string}
+                        policyRevision: {type: integer, format: int64, minimum: 1}
+                        credentialRevision: {type: integer, format: int64, minimum: 1}
+                        enforcedAt: {type: string, format: date-time}
+        '400':
+          description: Invalid cursor
+        '401':
+          description: Missing or invalid bearer token
+        '503':
+          description: Durable policy storage unavailable
   /api/v1/users:
     get:
       operationId: listUsers
@@ -274,6 +309,8 @@ paths:
               additionalProperties: false
               required: [enabled, expectedRevision]
               properties:
+                accessPolicy:
+                  $ref: '#/components/schemas/AccessPolicyChange'
                 uuid:
                   type: string
                   format: uuid
@@ -357,6 +394,8 @@ paths:
                   type: integer
                   format: int64
                   minimum: 1
+                accessPolicy:
+                  $ref: '#/components/schemas/AccessPolicyChange'
                 uuid:
                   type: string
                   format: uuid
@@ -599,8 +638,16 @@ components:
           description: More retained records existed after this coherent page
     Traffic:
       type: object
-      required: [approximate, pollIntervalSeconds, state, stale, observedAt, users, resetCount, skippedConnections]
+      required: [accountingEpoch, accountingSequence, approximate, pollIntervalSeconds, state, stale, observedAt, users, resetCount, skippedConnections]
       properties:
+        accountingEpoch:
+          type: string
+          format: uuid
+          description: Durable accounting identity, independent of core generation and telemetry run
+        accountingSequence:
+          type: string
+          pattern: '^(0|[1-9][0-9]{0,18})$'
+          description: Durable nonnegative int64 sequence, increments atomically with committed totals
         approximate:
           type: boolean
           enum: [true]
@@ -670,11 +717,47 @@ components:
               type: boolean
             userRotate:
               type: boolean
+            telemetryPushVersion:
+              type: integer
+              enum: [0, 1]
+              description: Version 1 supports private file enrollment and push; 0 means no file watcher configured
+            accessExpiry:
+              type: boolean
+              description: Supports durable local expiry and access-policy event reconciliation
+        telemetryDelivery:
+          $ref: '#/components/schemas/TelemetryDelivery'
         core:
           type: object
           properties:
             version:
               type: string
+    TelemetryDelivery:
+      type: object
+      description: Cached exporter diagnostics; never includes destination or credential. Export failure does not alter VPN readiness.
+      required: [configured, committedSequence, heartbeatSequence]
+      properties:
+        configured: {type: boolean}
+        configurationError: {type: string}
+        registrationError: {type: string}
+        heartbeatError: {type: string}
+        historyError: {type: string}
+        lastHeartbeatAt: {type: string, format: date-time}
+        committedSequence: {$ref: '#/components/schemas/TelemetrySequence'}
+        heartbeatSequence: {$ref: '#/components/schemas/TelemetrySequence'}
+    AccessPolicyChange:
+      type: object
+      additionalProperties: false
+      required: [revision, expiresAt, renew]
+      description: Omission preserves existing policy for legacy callers. Revision increases per user, independently of global expectedRevision. Only an explicit newer renewal clears the expiry latch; rotation requires renew=false and preserves desired enablement. Retrying an identical rotation policy does not clear a later latch.
+      properties:
+        revision: {type: integer, format: int64, minimum: 1}
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: UTC deadline ending in Z, or null for unlimited access
+        renew:
+          type: boolean
+          description: Explicit renewal; a non-null deadline must be in the future
     UserOperation:
       type: object
       required: [revision, state]
@@ -706,6 +789,18 @@ components:
                 type: string
               enabled:
                 type: boolean
+              expiresAt:
+                type: [string, 'null']
+                format: date-time
+              policyRevision:
+                type: integer
+                format: int64
+                minimum: 0
+              expiryEnforcedRevision:
+                type: integer
+                format: int64
+                minimum: 0
+                description: Global revision which latched expiry; zero until enforced. Never changes desired enabled.
               credentialRevision:
                 type: integer
                 format: int64

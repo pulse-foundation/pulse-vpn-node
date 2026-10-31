@@ -26,6 +26,10 @@ func TestNode(t *testing.T) {
 				l.compose(t, "run", "--rm", "--no-deps", "postgres-check")
 			case "Lifecycle":
 				l.lifecycle(t)
+			case "BackupRestore":
+				l.backupRestore(t)
+			case "Expiry":
+				l.expiry(t)
 			case "ManagedRecovery":
 				l.managedRecovery(t)
 			case "ManagedLifecycle":

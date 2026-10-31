@@ -23,6 +23,8 @@ type trafficUser struct {
 	Download string `json:"downloadBytes"`
 }
 type trafficSnapshot struct {
+	AccountingEpoch     string        `json:"accountingEpoch"`
+	AccountingSequence  string        `json:"accountingSequence"`
 	Approximate         bool          `json:"approximate"`
 	PollIntervalSeconds int           `json:"pollIntervalSeconds"`
 	State               string        `json:"state"`
@@ -38,6 +40,12 @@ type trafficBytes struct{ Upload, Download uint64 }
 func trafficRead() (trafficSnapshot, error) {
 	var s trafficSnapshot
 	if err := userAPI("GET", "traffic", nil, 200, &s); err != nil {
+		return s, err
+	}
+	if len(s.AccountingEpoch) != 36 {
+		return s, errors.New("accounting epoch missing")
+	}
+	if _, err := decimalCounter(s.AccountingSequence); err != nil {
 		return s, err
 	}
 	if !s.Approximate || s.PollIntervalSeconds != 2 || s.SkippedConnections < 0 {
@@ -320,6 +328,14 @@ func liveTraffic() error {
 	if err != nil {
 		return err
 	}
+	if before.AccountingEpoch != after.AccountingEpoch {
+		return errors.New("core restart changed durable accounting epoch")
+	}
+	beforeSeq, _ := decimalCounter(before.AccountingSequence)
+	afterSeq, _ := decimalCounter(after.AccountingSequence)
+	if afterSeq < beforeSeq {
+		return errors.New("core restart regressed accounting sequence")
+	}
 	if !sameTraffic(before, after) {
 		return errors.New("disabling user changed retained traffic totals")
 	}
@@ -365,6 +381,14 @@ func persistedTraffic() error {
 	after, err := stableTraffic()
 	if err != nil {
 		return err
+	}
+	if before.AccountingEpoch != after.AccountingEpoch {
+		return errors.New("core restart changed durable accounting epoch")
+	}
+	beforeSeq, _ := decimalCounter(before.AccountingSequence)
+	afterSeq, _ := decimalCounter(after.AccountingSequence)
+	if afterSeq < beforeSeq {
+		return errors.New("core restart regressed accounting sequence")
 	}
 	if !sameTraffic(before, after) {
 		return errors.New("traffic totals changed after node/core restart")

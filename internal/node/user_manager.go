@@ -14,6 +14,7 @@ type UserRuntimeStatus struct {
 	Error            string `json:"error,omitempty"`
 }
 type UsersView struct {
+	Recovery *RecoveryStatus   `json:"recovery,omitempty"`
 	Revision int64             `json:"revision"`
 	Users    []ManagedUser     `json:"users"`
 	Runtime  UserRuntimeStatus `json:"runtime"`
@@ -22,19 +23,22 @@ type UsersView struct {
 // UserManager has one application-owned writer. API calls only commit intent;
 // polling and retries survive the lifetime of any individual HTTP request.
 type UserManager struct {
-	reservedPorts []int
-	store         UserStore
-	runtime       UserRuntime
-	mu            sync.RWMutex
-	status        UserRuntimeStatus
-	applied       UserSnapshot // writer-owned; never exposed to HTTP callers
-	cleanup       UserSnapshot // latest attempted intent, including an uncertain reload
-	connection    *Connection  // protected by mu, verified applied public state
-	recorded      bool
+	reservedPorts      []int
+	store              UserStore
+	runtime            UserRuntime
+	mu                 sync.RWMutex
+	status             UserRuntimeStatus
+	applied            UserSnapshot // writer-owned; never exposed to HTTP callers
+	cleanup            UserSnapshot // latest attempted intent, including an uncertain reload
+	connection         *Connection  // protected by mu, verified applied public state
+	recorded           bool
+	now                func() time.Time
+	expiryObservations []AccessExpiryObservation
+	emergencyPending   bool
 }
 
 func NewUserManager(store UserStore, runtime UserRuntime, reservedPorts ...int) *UserManager {
-	return &UserManager{reservedPorts: slices.Clone(reservedPorts), store: store, runtime: runtime, status: UserRuntimeStatus{CleanupState: "pending"}}
+	return &UserManager{now: time.Now, reservedPorts: slices.Clone(reservedPorts), store: store, runtime: runtime, status: UserRuntimeStatus{CleanupState: "pending"}}
 }
 func (m *UserManager) Managed() bool { _, ok := m.store.(ManagedStore); return ok }
 func (m *UserManager) Connection() *Connection {
@@ -72,7 +76,7 @@ func (m *UserManager) View(ctx context.Context) (UsersView, error) {
 	if err != nil {
 		return UsersView{}, err
 	}
-	return UsersView{Revision: snapshot.Revision, Users: snapshot.Users, Runtime: m.Status()}, nil
+	return UsersView{Recovery: snapshot.Recovery, Revision: snapshot.Revision, Users: snapshot.Users, Runtime: m.Status()}, nil
 }
 func (m *UserManager) Change(ctx context.Context, change UserChange) (Operation, error) {
 	return m.store.Change(ctx, change)
@@ -105,12 +109,20 @@ func (m *UserManager) Run(ctx context.Context) {
 
 func (m *UserManager) step(ctx context.Context) bool {
 	message := ""
+	now := m.now().UTC() // UTC strips Go's monotonic reading; deadlines are wall-clock values.
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	snapshot, err := m.store.Snapshot(readCtx)
+	var snapshot UserSnapshot
+	var err error
+	if store, ok := m.store.(AccessPolicyStore); ok {
+		snapshot, err = store.ReconcileAccessPolicy(readCtx, now, m.expiryObservations...)
+	} else {
+		snapshot, err = m.store.Snapshot(readCtx)
+	}
 	cancel()
 	if err != nil {
 		message = "desired user state unavailable"
 	} else {
+		m.expiryObservations = nil // SQL committed the matching epochs or an explicit newer renewal superseded them.
 		// Do not overwrite a verified result whose durable acknowledgement is
 		// still pending. Retry it before the next runtime transition, even when
 		// that newer transition will fail. Existing revocation sweeps continue.
@@ -125,22 +137,7 @@ func (m *UserManager) step(ctx context.Context) bool {
 			m.status.ApplyingRevision = snapshot.Revision
 			m.mu.Unlock()
 			applyCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			if snapshot.Managed {
-				runtime, ok := m.runtime.(ManagedRuntime)
-				if !ok {
-					err = ErrUnavailable
-				} else {
-					var settings *VLESS
-					if snapshot.Connection != nil {
-						v := *snapshot.Connection
-						v.Users = snapshot.Active()
-						settings = &v
-					}
-					err = runtime.ApplyState(applyCtx, settings)
-				}
-			} else {
-				err = m.runtime.ApplyUsers(applyCtx, snapshot.Active())
-			}
+			err = m.applySnapshot(applyCtx, snapshot)
 			cancel()
 			if err != nil {
 				message = "user configuration application failed"
@@ -149,6 +146,7 @@ func (m *UserManager) step(ctx context.Context) bool {
 				cancel()
 			} else {
 				m.applied = snapshot
+				m.emergencyPending = false
 				connection, _ := DescribeConnection(snapshot.Connection)
 				m.mu.Lock()
 				m.connection = connection
@@ -158,6 +156,29 @@ func (m *UserManager) step(ctx context.Context) bool {
 		}
 		if message == "" && !m.recordApplied(ctx) {
 			message = "user application result unavailable"
+		}
+	}
+	// A local DB/result-write outage must not extend a known deadline. Remove
+	// only expired credentials from the latest attempted snapshot, keep sweeping,
+	// and persist the observed deadline before any later re-enable after recovery.
+	emergency := m.cleanup
+	emergency.Users = slices.Clone(emergency.Users)
+	due := false
+	for i, u := range emergency.Users {
+		if u.ExpiryEnforcedRevision == 0 && u.ExpiresAt != nil && !now.Before(*u.ExpiresAt) {
+			emergency.Users[i].ExpiryEnforcedRevision = emergency.Revision
+			m.expiryObservations = append(m.expiryObservations, AccessExpiryObservation{Name: u.Name, RenewalRevision: u.RenewalRevision, ObservedAt: now})
+			due = true
+		}
+	}
+	if due || m.emergencyPending {
+		m.cleanup = emergency
+		applyCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := m.applySnapshot(applyCtx, emergency)
+		cancel()
+		m.emergencyPending = err != nil
+		if err != nil {
+			message = "expired credential removal pending"
 		}
 	}
 	cleanup := "pending"
@@ -196,4 +217,21 @@ func (m *UserManager) recordApplied(ctx context.Context) bool {
 	}
 	m.recorded = true
 	return true
+}
+
+func (m *UserManager) applySnapshot(ctx context.Context, snapshot UserSnapshot) error {
+	if !snapshot.Managed {
+		return m.runtime.ApplyUsers(ctx, snapshot.Active())
+	}
+	runtime, ok := m.runtime.(ManagedRuntime)
+	if !ok {
+		return ErrUnavailable
+	}
+	var settings *VLESS
+	if snapshot.Connection != nil {
+		v := *snapshot.Connection
+		v.Users = snapshot.Active()
+		settings = &v
+	}
+	return runtime.ApplyState(ctx, settings)
 }

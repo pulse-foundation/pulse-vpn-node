@@ -51,3 +51,22 @@ func TestTelemetryResourcesDoNotWaitForCoreAndWorkersJoin(t *testing.T) {
 		t.Fatal("telemetry workers did not join")
 	}
 }
+
+func TestRuntimeTelemetryOmitsUnsupportedRestartCounter(t *testing.T) {
+	now := time.Now()
+	core := &testRuntime{done: make(chan struct{}), ready: func(context.Context) (string, error) { return "test", nil }}
+	sampler := &runtimeSampler{core: core, agentStart: now, coreStart: now}
+	sample := sampler.Sample(context.Background())
+	seen := make(map[string]bool)
+	for _, metric := range sample.Metrics {
+		if metric.Name == "core.restarts" {
+			t.Fatal("unsupported restart count must not be emitted as zero")
+		}
+		seen[metric.Name] = true
+	}
+	for _, name := range []string{"agent.uptime", "core.uptime", "core.ready", "core.active_connections", "database.reachable"} {
+		if !seen[name] {
+			t.Errorf("lost current runtime metric %s", name)
+		}
+	}
+}

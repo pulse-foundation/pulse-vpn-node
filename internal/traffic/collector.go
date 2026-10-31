@@ -29,6 +29,7 @@ type Collector struct {
 	initialized bool
 	mu          sync.RWMutex
 	state       string
+	exported    *View
 }
 
 // NewCollector must follow a confirmed new owned child start, never an unverified
@@ -57,11 +58,34 @@ func (c *Collector) Run(ctx context.Context) {
 func (c *Collector) step(ctx context.Context) {
 	err := c.collect(ctx)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.state = "collecting"
 	if err != nil {
 		c.state = "degraded"
 	}
+	c.mu.Unlock()
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	view, readErr := c.View(readCtx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.exported = nil
+	if readErr == nil && view.ObservedAt != nil {
+		c.exported = &view
+	}
+}
+
+// ExportSnapshot is a cached, bounded read: database failure cannot delay the
+// independent heartbeat loop. The observation time remains the last committed time.
+func (c *Collector) ExportSnapshot() *View {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.exported == nil {
+		return nil
+	}
+	copy := *c.exported
+	copy.Users = append([]UserTotal{}, copy.Users...)
+	copy.Stale = copy.ObservedAt == nil || time.Since(*copy.ObservedAt) > 5*PollInterval
+	return &copy
 }
 
 func (c *Collector) collect(ctx context.Context) error {

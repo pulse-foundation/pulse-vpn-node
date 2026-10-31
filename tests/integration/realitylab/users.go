@@ -198,10 +198,7 @@ func (s *liveSessions) revoked() error {
 	if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
 		return errors.New("revoked TCP connection was not closed")
 	}
-	if err = s.udp.echo(); err == nil {
-		return errors.New("revoked UDP association still transfers")
-	}
-	return nil
+	return s.udp.revoked()
 }
 func coordinate(stage string) error {
 	fmt.Println("READY: " + stage)

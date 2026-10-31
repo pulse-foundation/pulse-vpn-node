@@ -5,12 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"strconv"
 	"time"
 )
+
+var errUDPEchoTimeout = errors.New("UDP echo timed out")
 
 type udpSession struct {
 	control net.Conn
@@ -74,10 +77,16 @@ func openUDP(proxy string) (_ *udpSession, resultErr error) {
 	return &udpSession{control: control, conn: conn}, nil
 }
 func (s *udpSession) echo() error {
+	return s.echoUntil(time.Now().Add(3 * time.Second))
+}
+
+func (s *udpSession) echoUntil(deadline time.Time) error {
 	conn := s.conn
 	var head [4]byte
 	var port [2]byte
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("UDP echo deadline failed: %w", err)
+	}
 	payload := make([]byte, 256)
 	_, _ = rand.Read(payload)
 	// Mihomo resolves UDP destinations on the client. Docker deliberately does not
@@ -90,12 +99,15 @@ func (s *udpSession) echo() error {
 	packet = append(packet, byte(9000>>8), byte(9000&255))
 	packet = append(packet, payload...)
 	if _, err := conn.Write(packet); err != nil {
-		return err
+		return fmt.Errorf("UDP echo write failed: %w", err)
 	}
 	b := make([]byte, 2048)
 	n, err := conn.Read(b)
 	if err != nil {
-		return errors.New("UDP echo timed out")
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return errUDPEchoTimeout
+		}
+		return fmt.Errorf("UDP echo read failed: %w", err)
 	}
 	reader := bytes.NewReader(b[:n])
 	if _, err := io.ReadFull(reader, head[:]); err != nil || head[0] != 0 || head[1] != 0 || head[2] != 0 {
@@ -112,6 +124,28 @@ func (s *udpSession) echo() error {
 		return errors.New("UDP echo integrity failed")
 	}
 	return nil
+}
+
+// TCP and UDP trackers are closed independently, possibly in different sweeps.
+// Permit transient echoes, but require a complete normal echo timeout inside a
+// bounded cleanup window. A shortened final timeout or a probe fault cannot
+// establish cessation of transfer.
+func (s *udpSession) revoked() error {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		probeDeadline := time.Now().Add(3 * time.Second)
+		if probeDeadline.After(deadline) {
+			return errors.New("revoked UDP association still transfers")
+		}
+		err := s.echoUntil(probeDeadline)
+		if errors.Is(err, errUDPEchoTimeout) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("revoked UDP probe failed: %w", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func readAddress(r io.Reader, kind byte) (string, error) {

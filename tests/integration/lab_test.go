@@ -30,6 +30,7 @@ var cases = []struct{ name, project string }{
 	{"Reality", "pulse-vpn-node-reality-test"},
 	{"Users", "pulse-vpn-node-users-test"},
 	{"Expiry", "pulse-vpn-node-expiry-test"},
+	{"BackupRestore", "pulse-vpn-node-backup-restore-test"},
 	{"Traffic", "pulse-vpn-node-traffic-test"},
 	{"Telemetry", "pulse-vpn-node-telemetry-test"},
 }

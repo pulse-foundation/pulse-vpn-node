@@ -3,7 +3,9 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 )
 
 const fixtureDir = "/fixtures"
@@ -15,6 +17,14 @@ func main() {
 		os.Exit(1)
 	}
 	switch os.Args[1] {
+	case "backup-setup":
+		err = backupSetup()
+	case "backup-held":
+		err = backupHeld()
+	case "backup-release":
+		err = backupRelease()
+	case "backup-revoked":
+		err = backupRevoked()
 	case "generate":
 		err = generate()
 	case "managed-idle":
@@ -53,6 +63,14 @@ func main() {
 		err = liveTelemetry()
 	case "telemetry-persist":
 		err = persistedTelemetry()
+	case "vpn-profile":
+		var client *http.Client
+		client, err = proxyClient(os.Getenv("REALITY_TEST_PROXY"))
+		if err == nil {
+			err = transfer(client, "https")
+		}
+	case "reject-profile":
+		err = expectRejected(os.Getenv("REALITY_TEST_PROXY"))
 	case "probe":
 		err = probe()
 	case "reject-bad-uuid":
@@ -65,7 +83,7 @@ func main() {
 		err = fmt.Errorf("unknown fixture command")
 	}
 	if err != nil {
-		if os.Args[1] == "expiry-live" || os.Args[1] == "expiry-persist" || os.Args[1] == "managed-create-failure" || os.Args[1] == "managed-still-failed" || os.Args[1] == "managed-recovered" || os.Args[1] == "managed-configure" || os.Args[1] == "managed-lifecycle" || os.Args[1] == "managed-persist" || os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
+		if strings.HasPrefix(os.Args[1], "backup-") || os.Args[1] == "expiry-live" || os.Args[1] == "expiry-persist" || os.Args[1] == "managed-create-failure" || os.Args[1] == "managed-still-failed" || os.Args[1] == "managed-recovered" || os.Args[1] == "managed-configure" || os.Args[1] == "managed-lifecycle" || os.Args[1] == "managed-persist" || os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
 			fmt.Println("FAIL: " + err.Error())
 		}
 		fmt.Fprintln(os.Stderr, err)

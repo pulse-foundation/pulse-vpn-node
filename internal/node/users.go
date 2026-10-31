@@ -21,17 +21,29 @@ type UserRuntime interface {
 }
 
 type ManagedUser struct {
-	RenewalRevision        int64      `json:"-"`
-	ExpiresAt              *time.Time `json:"expiresAt"`
-	PolicyRevision         int64      `json:"policyRevision"`
-	ExpiryEnforcedRevision int64      `json:"expiryEnforcedRevision"`
-	Name                   string     `json:"name"`
-	RuntimeName            string     `json:"-"`
-	CredentialRevision     int64      `json:"credentialRevision"`
-	UUID                   string     `json:"-"`
-	Enabled                bool       `json:"enabled"`
+	ReleasedRecoveryHoldID        string     `json:"releasedRecoveryHoldId,omitempty"`
+	RecoveryReleasePolicyRevision int64      `json:"recoveryReleasePolicyRevision,omitempty"`
+	RecoveryHoldID                string     `json:"recoveryHoldId,omitempty"`
+	RecoveryHoldRevision          int64      `json:"recoveryHoldRevision,omitempty"`
+	RenewalRevision               int64      `json:"-"`
+	ExpiresAt                     *time.Time `json:"expiresAt"`
+	PolicyRevision                int64      `json:"policyRevision"`
+	ExpiryEnforcedRevision        int64      `json:"expiryEnforcedRevision"`
+	Name                          string     `json:"name"`
+	RuntimeName                   string     `json:"-"`
+	CredentialRevision            int64      `json:"credentialRevision"`
+	UUID                          string     `json:"-"`
+	Enabled                       bool       `json:"enabled"`
 }
+type RecoveryStatus struct {
+	RequestID       string `json:"requestId,omitempty"`
+	RestoreRevision int64  `json:"restoreRevision"`
+	Generation      string `json:"generation"`
+	Pending         bool   `json:"pending"`
+}
+
 type UserSnapshot struct {
+	Recovery     *RecoveryStatus
 	Revision     int64
 	Users        []ManagedUser
 	Connection   *VLESS

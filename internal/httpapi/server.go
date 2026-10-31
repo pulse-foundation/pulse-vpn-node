@@ -24,6 +24,7 @@ type Status struct {
 type Capabilities struct {
 	TelemetryPushVersion int  `json:"telemetryPushVersion"`
 	AccessExpiry         bool `json:"accessExpiry"`
+	AccessRecovery       bool `json:"accessRecovery"`
 	ConnectionCreate     bool `json:"connectionCreate"`
 	UserDelete           bool `json:"userDelete"`
 	UserRotate           bool `json:"userRotate"`
@@ -78,7 +79,7 @@ func NewWithServices(token string, vpnConfigured bool, check func(context.Contex
 			code = http.StatusServiceUnavailable
 		}
 		if managed {
-			status.Capabilities = Capabilities{AccessExpiry: services.Users.AccessPolicySupported(), ConnectionCreate: true, UserDelete: true, UserRotate: true}
+			status.Capabilities = Capabilities{AccessRecovery: services.Users.AccessPolicySupported(), AccessExpiry: services.Users.AccessPolicySupported(), ConnectionCreate: true, UserDelete: true, UserRotate: true}
 		}
 
 		if services.TelemetryDelivery != nil {

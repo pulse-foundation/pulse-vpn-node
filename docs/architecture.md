@@ -407,3 +407,40 @@ belongs to the receiver. Final bytes between polls may be missing. Recovery into
 older database requires a new accounting epoch before export; the recovery operation
 must establish that boundary explicitly (restoring a database file alone is not a
 supported recovery procedure).
+
+## Privileged backup and recovery
+
+`pulse-vpn-node backup` exports a versioned logical SQL snapshot from one repeatable-read
+transaction, including connection secrets, credentials (including retired UUIDs), desired users,
+operations, expiry audit and traffic totals. Its stdout is secret-bearing: send it directly to an
+authenticated encrypted off-node store, never application logs or routine API responses. Migration
+checksums and the current schema must match the executable. Management/telemetry credentials and
+external deployment configuration are not part of this database export; the controller must capture
+and validate its deployment/image manifest separately.
+
+Stop the destination and run explicit migrations into an empty database before `restore`. The
+command reads bounded JSON `{snapshot,currentIntent}` on stdin. Exact schema compatibility is
+required; this is not a cross-version downgrade facility. Fence the old installation, provision
+fresh management credentials, retire old telemetry enrollment and reconcile the authoritative
+controller ledger before exposing a replacement. Node cannot independently authenticate a remote
+controller's administrative history: this privileged transport trusts that input.
+
+Absent or incomplete current intent creates a pending recovery with every user held and rejects
+ordinary mutations. Complete intent retires absent/replaced credentials, preserves current disabled
+intent and imposes a recovery hold on every access that was finite in the source or current policy,
+or has a retained controller hold. A corrected clock before the old deadline cannot prove that an
+offline expiry was never enforced. Ordinary queued renewal does not clear the hold. Explicit
+recovery authorization names the current hold, supplies a newer renewal revision and synchronized
+controller UTC within 120 seconds of Node time. Manual disable, revocation and expiry still apply.
+The controller must obtain actual trusted clock evidence rather than asserting synchronization.
+
+A request ID plus canonical input fingerprint makes an exact restore retry safe after a lost ACK.
+`recovery-status` reports only safe recovery IDs/revisions and held user identities. A durable
+per-user release receipt lets the controller reconcile a lost release ACK; it is not proof that the
+runtime has applied the policy, and does not supersede newer administrative intent.
+
+Restore preserves traffic totals as a baseline, creates a new accounting epoch with sequence zero
+and discards live collector checkpoints. A controller must not add that baseline again. SQL commit
+alone does not establish readiness: verify applied runtime and a real external VPN profile before
+completing operational recovery. Public regression: `TestNode/BackupRestore` under the documented
+`integration` test tag, using only disposable Compose resources.

@@ -188,9 +188,10 @@ func decodeAccessPolicy(raw json.RawMessage) (*node.AccessPolicyChange, error) {
 		return nil, nil
 	}
 	var body struct {
-		Revision  *int64          `json:"revision"`
-		ExpiresAt json.RawMessage `json:"expiresAt"`
-		Renew     *bool           `json:"renew"`
+		Recovery  *node.AccessRecoveryRelease `json:"recovery"`
+		Revision  *int64                      `json:"revision"`
+		ExpiresAt json.RawMessage             `json:"expiresAt"`
+		Renew     *bool                       `json:"renew"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
@@ -209,5 +210,5 @@ func decodeAccessPolicy(raw json.RawMessage) (*node.AccessPolicyChange, error) {
 		}
 		deadline = &t
 	}
-	return &node.AccessPolicyChange{Revision: *body.Revision, ExpiresAt: deadline, Renew: *body.Renew}, nil
+	return &node.AccessPolicyChange{Revision: *body.Revision, ExpiresAt: deadline, Renew: *body.Renew, Recovery: body.Recovery}, nil
 }

@@ -7,10 +7,17 @@ import (
 
 // AccessPolicyChange is an explicitly versioned policy. Omission by a legacy
 // caller preserves the deadline and latch. Only Renew on a newer policy clears it.
+type AccessRecoveryRelease struct {
+	HoldID            string    `json:"holdId"`
+	ControllerUTC     time.Time `json:"controllerUtc"`
+	ClockSynchronized bool      `json:"clockSynchronized"`
+}
+
 type AccessPolicyChange struct {
-	Revision  int64      `json:"revision"`
-	ExpiresAt *time.Time `json:"expiresAt"`
-	Renew     bool       `json:"renew"`
+	Recovery  *AccessRecoveryRelease `json:"recovery,omitempty"`
+	Revision  int64                  `json:"revision"`
+	ExpiresAt *time.Time             `json:"expiresAt"`
+	Renew     bool                   `json:"renew"`
 }
 
 type AccessPolicyEvent struct {
@@ -38,6 +45,9 @@ type AccessPolicyStore interface {
 func EffectiveAccess(user ManagedUser, now time.Time) (bool, string) {
 	if !user.Enabled {
 		return false, "disabled"
+	}
+	if user.RecoveryHoldID != "" {
+		return false, "recovery_hold"
 	}
 	if user.ExpiryEnforcedRevision > 0 || user.ExpiresAt != nil && !now.Before(*user.ExpiresAt) {
 		return false, "expired"

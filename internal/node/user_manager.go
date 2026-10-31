@@ -14,6 +14,7 @@ type UserRuntimeStatus struct {
 	Error            string `json:"error,omitempty"`
 }
 type UsersView struct {
+	Recovery *RecoveryStatus   `json:"recovery,omitempty"`
 	Revision int64             `json:"revision"`
 	Users    []ManagedUser     `json:"users"`
 	Runtime  UserRuntimeStatus `json:"runtime"`
@@ -75,7 +76,7 @@ func (m *UserManager) View(ctx context.Context) (UsersView, error) {
 	if err != nil {
 		return UsersView{}, err
 	}
-	return UsersView{Revision: snapshot.Revision, Users: snapshot.Users, Runtime: m.Status()}, nil
+	return UsersView{Recovery: snapshot.Recovery, Revision: snapshot.Revision, Users: snapshot.Users, Runtime: m.Status()}, nil
 }
 func (m *UserManager) Change(ctx context.Context, change UserChange) (Operation, error) {
 	return m.store.Change(ctx, change)

@@ -32,13 +32,16 @@ func run() error {
 		return err
 	}
 	if len(os.Args) > 1 {
+		if len(os.Args) == 2 && (os.Args[1] == "backup" || os.Args[1] == "restore" || os.Args[1] == "recovery-status") {
+			return runBackupCommand(cfg, os.Args[1], os.Stdin, os.Stdout)
+		}
 		if len(os.Args) == 2 && os.Args[1] == "migrate" {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			return app.Migrate(ctx, cfg)
 		}
 		if len(os.Args) != 2 || (os.Args[1] != "healthcheck" && os.Args[1] != "status") {
-			return errors.New("usage: pulse-vpn-node [init|healthcheck|status|migrate]")
+			return errors.New("usage: pulse-vpn-node [init|healthcheck|status|migrate|backup|restore|recovery-status]")
 		}
 		return check(cfg, os.Args[1] == "status")
 	}

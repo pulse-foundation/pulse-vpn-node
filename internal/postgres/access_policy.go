@@ -24,8 +24,14 @@ func changeAccessPolicy(ctx context.Context, tx pgx.Tx, c node.UserChange) error
 	if policy.Renew && policy.ExpiresAt != nil && !policy.ExpiresAt.After(time.Now()) {
 		return node.ErrInvalid
 	}
-	_, err := tx.Exec(ctx, `UPDATE node_users SET policy_revision=$2,expires_at=$3,renewal_revision=CASE WHEN $4 THEN $2 ELSE renewal_revision END,
- expiry_enforced_revision=CASE WHEN $4 THEN 0 WHEN expiry_enforced_revision>0 THEN $5 ELSE 0 END WHERE name=$1`, c.Name, policy.Revision, policy.ExpiresAt, policy.Renew, c.ExpectedRevision+1)
+	clearHold, err := authorizeRecoveryRelease(ctx, tx, c)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE node_users SET policy_revision=$2,expires_at=$3,renewal_revision=CASE WHEN $4 THEN $2 ELSE renewal_revision END,
+ expiry_enforced_revision=CASE WHEN $4 THEN 0 WHEN expiry_enforced_revision>0 THEN $5 ELSE 0 END,
+ released_recovery_hold_id=CASE WHEN $6 THEN recovery_hold_id ELSE released_recovery_hold_id END,recovery_release_policy_revision=CASE WHEN $6 THEN $2 ELSE recovery_release_policy_revision END,
+ recovery_hold_id=CASE WHEN $6 THEN NULL ELSE recovery_hold_id END,recovery_hold_revision=CASE WHEN $6 THEN 0 ELSE recovery_hold_revision END WHERE name=$1`, c.Name, policy.Revision, policy.ExpiresAt, policy.Renew, c.ExpectedRevision+1, clearHold)
 	if err != nil {
 		return sanitized(err)
 	}
@@ -129,4 +135,29 @@ func (s *Store) AccessPolicyEvents(ctx context.Context, after int64) ([]node.Acc
 		return nil, node.ErrUnavailable
 	}
 	return events, nil
+}
+
+// Recovery is an explicit, fresh controller authorization, never an implication
+// of an ordinary renewal that may have been queued before the restore.
+func authorizeRecoveryRelease(ctx context.Context, tx pgx.Tx, c node.UserChange) (bool, error) {
+	p := c.AccessPolicy
+	if p.Recovery == nil {
+		return false, nil
+	}
+	r := p.Recovery
+	if c.Kind != "" || !p.Renew || !uuidPattern.MatchString(r.HoldID) || !r.ClockSynchronized || r.ControllerUTC.IsZero() || time.Since(r.ControllerUTC).Abs() > 120*time.Second {
+		return false, node.ErrInvalid
+	}
+	var hold string
+	var floor int64
+	if err := tx.QueryRow(ctx, "SELECT COALESCE(recovery_hold_id::text,''),recovery_hold_revision FROM node_users WHERE name=$1", c.Name).Scan(&hold, &floor); err != nil {
+		return false, node.ErrUnavailable
+	}
+	if hold == "" || hold != r.HoldID || p.Revision <= floor {
+		return false, node.ErrConflict
+	}
+	if p.ExpiresAt != nil && !p.ExpiresAt.After(r.ControllerUTC) {
+		return false, node.ErrInvalid
+	}
+	return true, nil
 }

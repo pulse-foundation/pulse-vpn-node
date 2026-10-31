@@ -63,6 +63,8 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 }
 func (s *Store) Close() { s.pool.Close() }
 
+var schemaMigrationFiles = []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql", "migrations/005_traffic_accounting.sql", "migrations/006_recovery_holds.sql"}
+
 // Migrate applies reviewed embedded SQL atomically and records its checksum.
 // Existing migration contents cannot change silently, and a newer schema is
 // rejected rather than guessed at. The transaction lock serializes migrators.
@@ -82,7 +84,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	// The explicit order is the reviewed schema history. Reject gaps, unknown
 	// versions and changed checksums before applying any pending migration.
-	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql", "migrations/005_traffic_accounting.sql"}
+	files := schemaMigrationFiles
 	rows, err := tx.Query(ctx, "SELECT version,checksum FROM node_schema_migrations ORDER BY version")
 	if err != nil {
 		return node.ErrUnavailable
@@ -154,22 +156,26 @@ func lockState(ctx context.Context, tx pgx.Tx) (int64, bool, error) {
 func snapshot(ctx context.Context, tx pgx.Tx, revision int64) (node.UserSnapshot, error) {
 	result := node.UserSnapshot{Revision: revision, Users: []node.ManagedUser{}}
 	var settings []byte
-	if err := tx.QueryRow(ctx, "SELECT connection_initialized,connection_settings FROM node_user_state WHERE singleton").Scan(&result.Managed, &settings); err != nil {
+	var recovery node.RecoveryStatus
+	if err := tx.QueryRow(ctx, "SELECT connection_initialized,connection_settings,COALESCE(recovery_generation::text,''),recovery_pending,COALESCE(recovery_request_id::text,''),recovery_restore_revision FROM node_user_state WHERE singleton").Scan(&result.Managed, &settings, &recovery.Generation, &recovery.Pending, &recovery.RequestID, &recovery.RestoreRevision); err != nil {
 		return result, node.ErrUnavailable
+	}
+	if recovery.Generation != "" {
+		result.Recovery = &recovery
 	}
 	if settings != nil {
 		if json.Unmarshal(settings, &result.Connection) != nil || result.Connection == nil || result.Connection.Validate() != nil {
 			return result, node.ErrUnavailable
 		}
 	}
-	rows, err := tx.Query(ctx, "SELECT u.name,u.uuid::text,u.enabled,u.credential_revision,c.runtime_name,u.expires_at,u.policy_revision,u.expiry_enforced_revision,u.renewal_revision FROM node_users u JOIN node_user_credentials c ON c.uuid=u.uuid WHERE NOT u.deleted ORDER BY u.name LIMIT $1", maxUsers+1)
+	rows, err := tx.Query(ctx, "SELECT u.name,u.uuid::text,u.enabled,u.credential_revision,c.runtime_name,u.expires_at,u.policy_revision,u.expiry_enforced_revision,u.renewal_revision,COALESCE(u.recovery_hold_id::text,''),u.recovery_hold_revision,COALESCE(u.released_recovery_hold_id::text,''),u.recovery_release_policy_revision FROM node_users u JOIN node_user_credentials c ON c.uuid=u.uuid WHERE NOT u.deleted ORDER BY u.name LIMIT $1", maxUsers+1)
 	if err != nil {
 		return node.UserSnapshot{}, node.ErrUnavailable
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var u node.ManagedUser
-		if err := rows.Scan(&u.Name, &u.UUID, &u.Enabled, &u.CredentialRevision, &u.RuntimeName, &u.ExpiresAt, &u.PolicyRevision, &u.ExpiryEnforcedRevision, &u.RenewalRevision); err != nil {
+		if err := rows.Scan(&u.Name, &u.UUID, &u.Enabled, &u.CredentialRevision, &u.RuntimeName, &u.ExpiresAt, &u.PolicyRevision, &u.ExpiryEnforcedRevision, &u.RenewalRevision, &u.RecoveryHoldID, &u.RecoveryHoldRevision, &u.ReleasedRecoveryHoldID, &u.RecoveryReleasePolicyRevision); err != nil {
 			return node.UserSnapshot{}, node.ErrUnavailable
 		}
 		result.Users = append(result.Users, u)
@@ -279,7 +285,7 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 		return node.Operation{}, node.ErrInvalid
 	}
 	if c.AccessPolicy != nil {
-		if (c.Kind != "" && c.Kind != "rotate") || (c.Kind == "rotate" && c.AccessPolicy.Renew) || c.AccessPolicy.Revision < 1 || c.AccessPolicy.ExpiresAt != nil && (c.AccessPolicy.ExpiresAt.Year() < 1 || c.AccessPolicy.ExpiresAt.Year() > 9999) {
+		if (c.Kind != "" && c.Kind != "rotate") || (c.Kind == "rotate" && (c.AccessPolicy.Renew || c.AccessPolicy.Recovery != nil)) || c.AccessPolicy.Revision < 1 || c.AccessPolicy.ExpiresAt != nil && (c.AccessPolicy.ExpiresAt.Year() < 1 || c.AccessPolicy.ExpiresAt.Year() > 9999) {
 			return node.Operation{}, node.ErrInvalid
 		}
 	}
@@ -310,6 +316,13 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 	revision, initialized, err := lockState(ctx, tx)
 	if err != nil || !initialized {
 		return node.Operation{}, node.ErrUnavailable
+	}
+	var recoveryPending bool
+	if err = tx.QueryRow(ctx, "SELECT recovery_pending FROM node_user_state WHERE singleton").Scan(&recoveryPending); err != nil {
+		return node.Operation{}, node.ErrUnavailable
+	}
+	if recoveryPending {
+		return node.Operation{}, node.ErrConflict
 	}
 	var existing node.Operation
 	var savedHash []byte

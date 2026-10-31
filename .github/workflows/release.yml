@@ -64,8 +64,8 @@ jobs:
             actual=$(docker image inspect pulse-vpn-node:integration-test --format '{{.Id}}')
             test "$actual" = "$(cat "verified-images/$arch.id")"
             test "$(docker image inspect "$actual" --format '{{.Os}}/{{.Architecture}}')" = "linux/$arch"
-            # Staging identity is stable across job retries. Never replace different bytes.
-            staging="$IMAGE:verified-$COMMIT-$arch"
+            # Release, commit and architecture identify verified bytes across job retries.
+            staging="$IMAGE:$(node scripts/release-manifest.mjs --staging-tag "$RELEASE_TAG" "$COMMIT" "$arch")"
             if docker buildx imagetools inspect "$staging" --raw > registry.json 2> registry-error; then
               test "$(jq -r '.config.digest' registry.json)" = "$actual"
             else

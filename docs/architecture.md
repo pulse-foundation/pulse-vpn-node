@@ -466,8 +466,11 @@ Manifest v1 contains `version`, `commit`, `verifiedAt`, `protocolVersion: 1`,
 different identifiers. SQL schema metadata describes compatibility; it does not promise
 an automatic schema upgrade.
 
-Retries reuse staging references keyed by commit and architecture only when their config
-IDs match. An existing final index must have the same two architecture digests; a completed
-release asset is never overwritten (a fresh version is required). Publication is confined
+Retries reuse staging references keyed by the full release tag, full commit and architecture
+only when their config IDs match. The release tooling validates these inputs and maps SemVer
+build metadata (`+` to `_`) into Docker tags of at most 128 characters. RC and stable releases
+from the same commit use separate staging references because their embedded versions differ.
+An existing final index must have the same two architecture digests; a completed release asset
+is never overwritten (a fresh version is required). Publication is confined
 to the release workflow with publishing-job write permissions; local verification does not
 publish images or assets.

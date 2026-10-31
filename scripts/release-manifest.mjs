@@ -7,6 +7,13 @@ export function registryTag(tag) {
  if(typeof tag!== 'string' || !tag.startsWith('v') || version.length>64 || !semver.test(version)) throw Error('invalid release tag');
  return tag.replace('+','_');
 }
+export function stagingTag(tag,commit,architecture) {
+ const releaseTag=registryTag(tag);
+ if(typeof commit!=='string' || commit.length!==40 || !/^[a-f0-9]{40}$/.test(commit) || !['amd64','arm64'].includes(architecture)) throw Error('invalid staging identity');
+ const result=`verified-${releaseTag}-${commit}-${architecture}`;
+ if(result.length>128 || /[^A-Za-z0-9_.-]/.test(result)) throw Error('invalid staging tag');
+ return result;
+}
 export function createManifest(input) {
  const {tag,version,commit,verifiedAt,protocolVersion,schemaVersion} = input;
  if (typeof version !== 'string' || version.length>64 || !semver.test(version) || tag !== 'v'+version || !/^[a-f0-9]{40}$/.test(commit) || !Number.isFinite(Date.parse(verifiedAt)) || protocolVersion!==1 || schemaVersion!==6) throw Error('invalid release identity');
@@ -25,6 +32,10 @@ export function assertSameRelease(existing, candidate) {
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
  if(process.argv[2]==='--registry-tag') {
   process.stdout.write(registryTag(process.argv[3])+'\n');
+  process.exit(0);
+ }
+ if(process.argv[2]==='--staging-tag') {
+  process.stdout.write(stagingTag(...process.argv.slice(3))+'\n');
   process.exit(0);
  }
  const [input,output,existing]=process.argv.slice(2);

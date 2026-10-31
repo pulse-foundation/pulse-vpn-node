@@ -87,3 +87,26 @@ func TestFailureJitterVariesPlateauAndHonorsRetryAfter(t *testing.T) {
 		t.Fatalf("Retry-After ignored: %v", delay)
 	}
 }
+
+func TestHeartbeatBuildIdentityIsNotInSamples(t *testing.T) {
+	exporter, _ := exporterFixture(t, func(w http.ResponseWriter, r *http.Request) {})
+	data, err := json.Marshal(exporter.heartbeatState())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	build, ok := state["build"].(map[string]any)
+	if !ok || build["version"] != "dev" || build["commit"] != "unknown" || build["architecture"] == "" {
+		t.Fatalf("missing build identity: %s", data)
+	}
+	data, err = json.Marshal(Sample{Kind: "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"build"`) {
+		t.Fatal("build identity in raw samples")
+	}
+}

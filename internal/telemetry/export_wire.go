@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo"
 	"github.com/pulse-foundation/pulse-vpn-node/internal/traffic"
 	"io"
 	"net/http"
@@ -25,9 +26,10 @@ type runRegistration struct {
 	ExpectedSession *string `json:"expectedSession"`
 }
 type heartbeatState struct {
-	Runtime RuntimeInfo `json:"runtime"`
-	Metrics []Metric    `json:"metrics,omitempty"`
-	Checks  []Check     `json:"checks,omitempty"`
+	Build   buildinfo.Info `json:"build"`
+	Runtime RuntimeInfo    `json:"runtime"`
+	Metrics []Metric       `json:"metrics,omitempty"`
+	Checks  []Check        `json:"checks,omitempty"`
 }
 type exportHeartbeat struct {
 	exportEnvelope

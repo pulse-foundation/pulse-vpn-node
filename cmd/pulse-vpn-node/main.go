@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo"
 	"io"
 	"log/slog"
 	"net"
@@ -24,6 +26,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		return json.NewEncoder(os.Stdout).Encode(buildinfo.Current())
+	}
 	if len(os.Args) > 1 && os.Args[1] == "init" {
 		return runInit(os.Args[2:], os.Stdout)
 	}

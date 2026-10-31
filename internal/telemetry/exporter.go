@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo"
 	"github.com/pulse-foundation/pulse-vpn-node/internal/traffic"
 	"math"
 	"net/http"
@@ -147,7 +148,7 @@ func (e *Exporter) register(ctx context.Context) *deliveryError {
 	return e.acceptACK(ack, e.cursor, 0)
 }
 func (e *Exporter) heartbeatState() heartbeatState {
-	state := heartbeatState{Runtime: RuntimeInfo{CoreState: "unavailable", UserState: "not_configured"}}
+	state := heartbeatState{Build: buildinfo.Current(), Runtime: RuntimeInfo{CoreState: "unavailable", UserState: "not_configured"}}
 	runtime := e.buffer.Latest("runtime", e.sampleMaxAge)
 	if runtime.Sample != nil {
 		state.Metrics = append(state.Metrics, runtime.Sample.Metrics...)

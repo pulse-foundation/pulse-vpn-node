@@ -445,3 +445,29 @@ and discards live collector checkpoints. A controller must not add that baseline
 alone does not establish readiness: verify applied runtime and a real external VPN profile before
 completing operational recovery. Public regression: `TestNode/BackupRestore` under the documented
 `integration` test tag, using only disposable Compose resources.
+
+### Verified agent release identity
+
+`internal/buildinfo` reports the agent version, source commit and Go runtime architecture;
+Mihomo's version remains separate. Development builds default to `dev` / `unknown`.
+`pulse-vpn-node version` prints this identity as JSON without loading configuration or
+opening the database. Telemetry includes it only in heartbeat `state.build`, never in
+buffered raw samples. Upgrade Pulse's receiver before rolling out this heartbeat field.
+
+The reusable checks workflow checks out the release tag's commit and passes the unprefixed
+SemVer and full commit into the integration build through Docker build arguments, before
+verification. The integration helper verifies the embedded identity of that exact image;
+the saved tar/config ID is published without rebuilding. Both native Linux architectures
+must pass the complete suite. Publication verifies registry manifest digests against the
+saved config IDs and uploads `pulse-node-release.json` last as the readiness marker.
+Manifest v1 contains `version`, `commit`, `verifiedAt`, `protocolVersion: 1`,
+`schemaVersion: 6`, and `architectures.amd64` / `architectures.arm64`, each with immutable
+`reference` and config `imageId`. Registry manifest digests and Docker config IDs are
+different identifiers. SQL schema metadata describes compatibility; it does not promise
+an automatic schema upgrade.
+
+Retries reuse staging references keyed by commit and architecture only when their config
+IDs match. An existing final index must have the same two architecture digests; a completed
+release asset is never overwritten (a fresh version is required). Publication is confined
+to the release workflow with publishing-job write permissions; local verification does not
+publish images or assets.

@@ -19,6 +19,9 @@ import (
 
 const nodeImage = "pulse-vpn-node:integration-test"
 
+var buildVersion = flag.String("build-version", "dev", "version embedded before verification")
+var buildCommit = flag.String("build-commit", "unknown", "commit embedded before verification")
+
 var prebuilt = flag.Bool("images-prebuilt", false, "require existing node, helper and check images instead of building")
 var cases = []struct{ name, project string }{
 	{"Init", "pulse-vpn-node-init-test"},
@@ -174,7 +177,7 @@ func (s *suite) prepare(t *testing.T) {
 		s.docker(t, "image", "inspect", nodeImage, "pulse-vpn-node-reality-lab:local", "pulse-vpn-node:checks")
 	} else {
 		l := &lab{suite: s, project: "pulse-vpn-node-storage-test"}
-		r := s.run(20*time.Minute, l.args("--profile", "test", "--progress", "plain", "build", "node", "generate", "postgres-check")...)
+		r := s.run(20*time.Minute, l.args("--profile", "test", "--progress", "plain", "build", "--build-arg", "NODE_VERSION="+*buildVersion, "--build-arg", "NODE_COMMIT="+*buildCommit, "node", "generate", "postgres-check")...)
 		if r.err != nil {
 			// Build contexts exclude operator secrets; runtime fixtures do not exist yet.
 			// Keep runtime command output private, but retain bounded build diagnostics.
@@ -182,6 +185,10 @@ func (s *suite) prepare(t *testing.T) {
 			t.Fatalf("image build/Go verification failed: %v", r.err)
 		}
 	}
+	identity := decode[struct{ Version, Commit, Architecture string }](t, s.docker(t, "run", "--rm", "--network", "none", "--read-only", nodeImage, "version"))
+	need(t, identity.Version == *buildVersion && identity.Commit == *buildCommit, "verified image build identity mismatch")
+	platform := s.docker(t, "image", "inspect", nodeImage, "--format", "{{.Architecture}}")
+	need(t, identity.Architecture == platform, "binary/image architecture mismatch")
 	s.imageID, s.prepared = s.image(t), true
 }
 func (s *suite) start(t *testing.T, project string) *lab {

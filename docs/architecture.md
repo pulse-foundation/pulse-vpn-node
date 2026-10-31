@@ -428,7 +428,8 @@ controller's administrative history: this privileged transport trusts that input
 Absent or incomplete current intent creates a pending recovery with every user held and rejects
 ordinary mutations. Complete intent retires absent/replaced credentials, preserves current disabled
 intent and imposes a recovery hold on every access that was finite in the source or current policy,
-or has a retained controller hold. A corrected clock before the old deadline cannot prove that an
+has a source expiry latch (even if its deadline was later removed), or has a retained controller hold.
+Source expiry evidence is never cleared merely because the controller has not imported it. A corrected clock before the old deadline cannot prove that an
 offline expiry was never enforced. Ordinary queued renewal does not clear the hold. Explicit
 recovery authorization names the current hold, supplies a newer renewal revision and synchronized
 controller UTC within 120 seconds of Node time. Manual disable, revocation and expiry still apply.

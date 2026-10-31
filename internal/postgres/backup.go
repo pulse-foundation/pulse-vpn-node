@@ -188,7 +188,7 @@ func (s *Store) RestoreBackup(ctx context.Context, b DatabaseBackup, intent *Rec
 			return result, sanitized(err)
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE node_users SET recovery_hold_revision=CASE WHEN expires_at IS NOT NULL OR recovery_hold_id IS NOT NULL THEN GREATEST(policy_revision,1) ELSE 0 END,recovery_hold_id=$1`, id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE node_users SET recovery_hold_revision=CASE WHEN expires_at IS NOT NULL OR recovery_hold_id IS NOT NULL OR expiry_enforced_revision>0 THEN GREATEST(policy_revision,1) ELSE 0 END,recovery_hold_id=$1`, id); err != nil {
 		return result, sanitized(err)
 	}
 	if _, err = tx.Exec(ctx, "UPDATE node_user_operations SET state='superseded',error='' WHERE state<>'applied'"); err != nil {
@@ -244,15 +244,17 @@ func validateRecoveryIntent(intent *RecoveryIntent) error {
 
 func reconcileRecoveryUsers(ctx context.Context, tx pgx.Tx, intent *RecoveryIntent, id string, revision int64) error {
 	// A corrected trusted clock cannot prove continuity of an offline expiry latch.
-	// All accesses finite in either snapshot or current intent remain held.
+	// Accesses finite or expiry-latched in the snapshot remain held, even when a
+	// later policy removed the deadline without explicit renewal. Controller intent
+	// may not yet contain the local expiry event and cannot erase that evidence.
 	if _, err := tx.Exec(ctx, "UPDATE node_users SET deleted=true,enabled=false"); err != nil {
 		return node.ErrUnavailable
 	}
 	trusted := intent.ClockSynchronized && !intent.ControllerUTC.IsZero() && time.Since(intent.ControllerUTC).Abs() <= 120*time.Second
 	for _, u := range intent.Users {
-		var wasFinite bool
+		var wasFinite, wasExpired bool
 		var oldPolicy int64
-		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM node_users WHERE name=$1 AND (expires_at IS NOT NULL OR recovery_hold_revision>0)),COALESCE((SELECT policy_revision FROM node_users WHERE name=$1),0)", u.Name).Scan(&wasFinite, &oldPolicy); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM node_users WHERE name=$1 AND (expires_at IS NOT NULL OR recovery_hold_revision>0)),COALESCE((SELECT policy_revision FROM node_users WHERE name=$1),0),COALESCE((SELECT expiry_enforced_revision>0 FROM node_users WHERE name=$1),false)", u.Name).Scan(&wasFinite, &oldPolicy, &wasExpired); err != nil {
 			return node.ErrUnavailable
 		}
 		if u.PolicyRevision < oldPolicy {
@@ -264,7 +266,7 @@ func reconcileRecoveryUsers(ctx context.Context, tx pgx.Tx, intent *RecoveryInte
 			holdID = id
 		}
 		expiryRevision := int64(0)
-		if u.ExpiryEnforced || (trusted && u.ExpiresAt != nil && !intent.ControllerUTC.Before(*u.ExpiresAt)) {
+		if wasExpired || u.ExpiryEnforced || (trusted && u.ExpiresAt != nil && !intent.ControllerUTC.Before(*u.ExpiresAt)) {
 			expiryRevision = revision
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO node_users(name,uuid,enabled,deleted,credential_revision,policy_revision,expires_at,expiry_enforced_revision,renewal_revision,recovery_hold_id,recovery_hold_revision)

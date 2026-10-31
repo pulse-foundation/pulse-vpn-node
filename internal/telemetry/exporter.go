@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/traffic"
 	"math"
 	"net/http"
 	"sync"
@@ -22,16 +23,18 @@ type ExportStatus struct {
 	HeartbeatSequence  string     `json:"heartbeatSequence"`
 }
 type ExporterOptions struct {
-	Transport    http.RoundTripper
-	Now          func() time.Time
-	RandomUint64 func() uint64 // Optional deterministic jitter source for tests.
-	SampleMaxAge time.Duration
-	ProbeMaxAge  time.Duration
+	TrafficSnapshot func() *traffic.View
+	Transport       http.RoundTripper
+	Now             func() time.Time
+	RandomUint64    func() uint64 // Optional deterministic jitter source for tests.
+	SampleMaxAge    time.Duration
+	ProbeMaxAge     time.Duration
 }
 
 // Exporter has one Run owner. Collection never waits for its network work.
 // Status is safe for concurrent cached reads and never contains credentials or destinations.
 type Exporter struct {
+	trafficSnapshot                      func() *traffic.View
 	config                               ExportConfig
 	buffer                               *Buffer
 	client                               *http.Client
@@ -75,7 +78,7 @@ func NewExporter(cfg ExportConfig, buffer *Buffer, options ExporterOptions) (*Ex
 	if random == nil {
 		random = deliveryRandom
 	}
-	return &Exporter{random: random, config: cfg, buffer: buffer, runID: page.RunID, now: now, sampleMaxAge: sampleAge, probeMaxAge: probeAge, client: &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, status: ExportStatus{Configured: true, CommittedSequence: "0", HeartbeatSequence: "0"}}, nil
+	return &Exporter{trafficSnapshot: options.TrafficSnapshot, random: random, config: cfg, buffer: buffer, runID: page.RunID, now: now, sampleMaxAge: sampleAge, probeMaxAge: probeAge, client: &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, status: ExportStatus{Configured: true, CommittedSequence: "0", HeartbeatSequence: "0"}}, nil
 }
 func (e *Exporter) Status() ExportStatus {
 	e.mu.Lock()
@@ -171,7 +174,11 @@ func (e *Exporter) sendHeartbeat(ctx context.Context) *deliveryError {
 		return &deliveryError{code: "sequence_exhausted", retry: time.Minute}
 	}
 	e.heartbeat++
-	ack, failure := e.post(ctx, "/heartbeat", exportHeartbeat{e.envelope(), e.session, e.heartbeat, e.heartbeatState()})
+	var snapshot *traffic.View
+	if e.trafficSnapshot != nil {
+		snapshot = e.trafficSnapshot()
+	}
+	ack, failure := e.post(ctx, "/heartbeat", exportHeartbeat{e.envelope(), e.session, e.heartbeat, e.heartbeatState(), snapshot})
 	if failure != nil {
 		return failure
 	}

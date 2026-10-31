@@ -389,3 +389,21 @@ being accepted into the image.
 - [Mihomo config API, v1.19.33](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/hub/route/configs.go).
 - [Mihomo listener replacement, v1.19.33](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/listener/listener.go).
 - [Mihomo connection snapshots, v1.19.33](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/hub/route/connections.go).
+
+### Durable traffic export identity
+
+Migration 005 assigns an accounting UUID and a decimal-string sequence to the local
+traffic state. Every accepted collection transaction advances that sequence with totals
+and checkpoints; replay and core/agent restart preserve the accounting identity.
+Counters remain nonnegative signed 64-bit values encoded as decimal strings; overflow
+fails the transaction rather than wrapping. Telemetry run IDs never identify accounting.
+
+The collector publishes a bounded cached copy of committed totals for the optional
+heartbeat `trafficSnapshot`. Export does not wait for SQL or poll the core. A database
+failure omits that snapshot, while heartbeat/resource export continues. Observation
+time belongs to collection, not transmission. Disabled users remain attributable;
+deleted users disappear from the bounded API, while their already exported history
+belongs to the receiver. Final bytes between polls may be missing. Recovery into an
+older database requires a new accounting epoch before export; the recovery operation
+must establish that boundary explicitly (restoring a database file alone is not a
+supported recovery procedure).

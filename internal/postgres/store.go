@@ -82,7 +82,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	// The explicit order is the reviewed schema history. Reject gaps, unknown
 	// versions and changed checksums before applying any pending migration.
-	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql"}
+	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql", "migrations/005_traffic_accounting.sql"}
 	rows, err := tx.Query(ctx, "SELECT version,checksum FROM node_schema_migrations ORDER BY version")
 	if err != nil {
 		return node.ErrUnavailable

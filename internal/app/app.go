@@ -102,8 +102,12 @@ func runManaged(ctx context.Context, cfg config.Config, adapter node.Core, store
 	joinTelemetry = stopTelemetry
 	services := httpapi.Services{StartupVLESS: cfg.VLESS, Users: manager, Telemetry: buffer, SampleInterval: time.Duration(cfg.Telemetry.SampleIntervalSeconds) * time.Second, ProbeInterval: time.Duration(cfg.Telemetry.ProbeIntervalSeconds) * time.Second}
 
+	var trafficSnapshot func() *traffic.View
+	if collector != nil {
+		trafficSnapshot = collector.ExportSnapshot
+	}
 	if cfg.TelemetryExportFile != "" {
-		delivery, stopDelivery := startTelemetryDelivery(ctx, cfg.TelemetryExportFile, buffer, telemetry.ExporterOptions{SampleMaxAge: 3 * time.Duration(cfg.Telemetry.SampleIntervalSeconds) * time.Second, ProbeMaxAge: 3 * time.Duration(cfg.Telemetry.ProbeIntervalSeconds) * time.Second})
+		delivery, stopDelivery := startTelemetryDelivery(ctx, cfg.TelemetryExportFile, buffer, telemetry.ExporterOptions{TrafficSnapshot: trafficSnapshot, SampleMaxAge: 3 * time.Duration(cfg.Telemetry.SampleIntervalSeconds) * time.Second, ProbeMaxAge: 3 * time.Duration(cfg.Telemetry.ProbeIntervalSeconds) * time.Second})
 		defer stopDelivery()
 		services.TelemetryDelivery = delivery
 	}

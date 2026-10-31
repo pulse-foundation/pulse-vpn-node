@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/pulse-foundation/pulse-vpn-node/internal/traffic"
 	"io"
 	"net/http"
 	"strconv"
@@ -33,6 +34,7 @@ type exportHeartbeat struct {
 	SessionID         string         `json:"sessionId"`
 	HeartbeatSequence uint64         `json:"heartbeatSequence,string"`
 	State             heartbeatState `json:"state"`
+	TrafficSnapshot   *traffic.View  `json:"trafficSnapshot,omitempty"`
 }
 type exportGap struct {
 	From    uint64 `json:"fromSequence,string"`

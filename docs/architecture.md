@@ -332,6 +332,31 @@ time/count/byte eviction, agent-run changes, and explicit gaps. Check that snaps
 for collectors and that buffer use remains bounded while Pulse is offline.
 Do not probe live VPSs or public targets as part of documentation work or routine tests.
 
+## Local access expiry
+
+Managed nodes advertise `capabilities.accessExpiry` after migration 004. The optional
+`accessPolicy` object on user writes carries a per-user increasing revision, an explicit nullable
+UTC `expiresAt`, and `renew`. Existing `enabled` remains administrative intent. Effective access
+requires enabled intent, a future/unlimited deadline, and no enforced-expiry latch.
+A newer explicit renewal can clear that latch, without overriding a disabled intent. Rotation
+preserves the latch and desired enablement and can atomically advance the associated policy.
+
+The single runtime writer reconciles SQL expiry before applying its first managed listener and on
+each tick. It commits expiry, a global application revision and retained evidence atomically before
+removing credentials, then repeatedly sweeps only affected runtime identities. Deadlines are not
+hard-real-time: normal reconciliation ticks every second; unavailable storage/controller calls and
+bounded retries add latency. A known deadline is also removed from the last attempted runtime
+snapshot during local database failure; pending expiry observations are scoped to the last explicit renewal and carried into SQL recovery.
+A backward UTC correction cannot undo them; an explicit newer renewal supersedes them without
+inheriting an incorrectly advanced clock. A normal restart starts the core idle;
+SQL must be available before any managed credentials are applied. Restoring an older database is a
+separate recovery workflow, not handled by the local restart path.
+
+`GET /api/v1/access-policy/events?after=N` reads one complete retained expiry revision, up to 1024
+users. Consumers commit every event in a page before advancing N. Evidence survives user deletion,
+rotation, renewal, process restart, and eviction of the independent 15-minute telemetry buffer.
+No TTL/pruning is currently enabled. API reads never expose credential material.
+
 ## Alternatives and scope
 
 Embedding Mihomo as a library would couple this project to internal core APIs. A separate executable
@@ -364,3 +389,88 @@ being accepted into the image.
 - [Mihomo config API, v1.19.33](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/hub/route/configs.go).
 - [Mihomo listener replacement, v1.19.33](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/listener/listener.go).
 - [Mihomo connection snapshots, v1.19.33](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/hub/route/connections.go).
+
+### Durable traffic export identity
+
+Migration 005 assigns an accounting UUID and a decimal-string sequence to the local
+traffic state. Every accepted collection transaction advances that sequence with totals
+and checkpoints; replay and core/agent restart preserve the accounting identity.
+Counters remain nonnegative signed 64-bit values encoded as decimal strings; overflow
+fails the transaction rather than wrapping. Telemetry run IDs never identify accounting.
+
+The collector publishes a bounded cached copy of committed totals for the optional
+heartbeat `trafficSnapshot`. Export does not wait for SQL or poll the core. A database
+failure omits that snapshot, while heartbeat/resource export continues. Observation
+time belongs to collection, not transmission. Disabled users remain attributable;
+deleted users disappear from the bounded API, while their already exported history
+belongs to the receiver. Final bytes between polls may be missing. Recovery into an
+older database requires a new accounting epoch before export; the recovery operation
+must establish that boundary explicitly (restoring a database file alone is not a
+supported recovery procedure).
+
+## Privileged backup and recovery
+
+`pulse-vpn-node backup` exports a versioned logical SQL snapshot from one repeatable-read
+transaction, including connection secrets, credentials (including retired UUIDs), desired users,
+operations, expiry audit and traffic totals. Its stdout is secret-bearing: send it directly to an
+authenticated encrypted off-node store, never application logs or routine API responses. Migration
+checksums and the current schema must match the executable. Management/telemetry credentials and
+external deployment configuration are not part of this database export; the controller must capture
+and validate its deployment/image manifest separately.
+
+Stop the destination and run explicit migrations into an empty database before `restore`. The
+command reads bounded JSON `{snapshot,currentIntent}` on stdin. Exact schema compatibility is
+required; this is not a cross-version downgrade facility. Fence the old installation, provision
+fresh management credentials, retire old telemetry enrollment and reconcile the authoritative
+controller ledger before exposing a replacement. Node cannot independently authenticate a remote
+controller's administrative history: this privileged transport trusts that input.
+
+Absent or incomplete current intent creates a pending recovery with every user held and rejects
+ordinary mutations. Complete intent retires absent/replaced credentials, preserves current disabled
+intent and imposes a recovery hold on every access that was finite in the source or current policy,
+has a source expiry latch (even if its deadline was later removed), or has a retained controller hold.
+Source expiry evidence is never cleared merely because the controller has not imported it. A corrected clock before the old deadline cannot prove that an
+offline expiry was never enforced. Ordinary queued renewal does not clear the hold. Explicit
+recovery authorization names the current hold, supplies a newer renewal revision and synchronized
+controller UTC within 120 seconds of Node time. Manual disable, revocation and expiry still apply.
+The controller must obtain actual trusted clock evidence rather than asserting synchronization.
+
+A request ID plus canonical input fingerprint makes an exact restore retry safe after a lost ACK.
+`recovery-status` reports only safe recovery IDs/revisions and held user identities. A durable
+per-user release receipt lets the controller reconcile a lost release ACK; it is not proof that the
+runtime has applied the policy, and does not supersede newer administrative intent.
+
+Restore preserves traffic totals as a baseline, creates a new accounting epoch with sequence zero
+and discards live collector checkpoints. A controller must not add that baseline again. SQL commit
+alone does not establish readiness: verify applied runtime and a real external VPN profile before
+completing operational recovery. Public regression: `TestNode/BackupRestore` under the documented
+`integration` test tag, using only disposable Compose resources.
+
+### Verified agent release identity
+
+`internal/buildinfo` reports the agent version, source commit and Go runtime architecture;
+Mihomo's version remains separate. Development builds default to `dev` / `unknown`.
+`pulse-vpn-node version` prints this identity as JSON without loading configuration or
+opening the database. Telemetry includes it only in heartbeat `state.build`, never in
+buffered raw samples. Upgrade Pulse's receiver before rolling out this heartbeat field.
+
+The reusable checks workflow checks out the release tag's commit and passes the unprefixed
+SemVer and full commit into the integration build through Docker build arguments, before
+verification. The integration helper verifies the embedded identity of that exact image;
+the saved tar/config ID is published without rebuilding. Both native Linux architectures
+must pass the complete suite. Publication verifies registry manifest digests against the
+saved config IDs and uploads `pulse-node-release.json` last as the readiness marker.
+Manifest v1 contains `version`, `commit`, `verifiedAt`, `protocolVersion: 1`,
+`schemaVersion: 6`, and `architectures.amd64` / `architectures.arm64`, each with immutable
+`reference` and config `imageId`. Registry manifest digests and Docker config IDs are
+different identifiers. SQL schema metadata describes compatibility; it does not promise
+an automatic schema upgrade.
+
+Retries reuse staging references keyed by the full release tag, full commit and architecture
+only when their config IDs match. The release tooling validates these inputs and maps SemVer
+build metadata (`+` to `_`) into Docker tags of at most 128 characters. RC and stable releases
+from the same commit use separate staging references because their embedded versions differ.
+An existing final index must have the same two architecture digests; a completed release asset
+is never overwritten (a fresh version is required). Publication is confined
+to the release workflow with publishing-job write permissions; local verification does not
+publish images or assets.

@@ -38,11 +38,13 @@ services:
       PULSE_NODE_VLESS_FILE: /run/secrets/node_vless
       PULSE_NODE_DATABASE_URL_FILE: /run/secrets/node_database_url
       PULSE_NODE_TELEMETRY_FILE: /run/secrets/node_telemetry
+      PULSE_NODE_TELEMETRY_EXPORT_FILE: /run/pulse-telemetry/enrollment.json
     secrets: [node_api_token, node_vless, node_database_url, node_telemetry]
     ports:
       - "127.0.0.1:${PULSE_NODE_PORT:-18080}:8080"
       - "${PULSE_NODE_VPN_BIND:-0.0.0.0}:${PULSE_NODE_VPN_PORT:-443}:8443"
     volumes:
+      - ${PULSE_NODE_TELEMETRY_DELIVERY_DIR:-./.local/telemetry-delivery}:/run/pulse-telemetry:ro
       # Native Linux host; on Docker Desktop these describe its Linux VM.
       - /proc/stat:/host/proc/stat:ro
       - /proc/meminfo:/host/proc/meminfo:ro

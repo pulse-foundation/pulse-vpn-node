@@ -10,13 +10,14 @@ import (
 )
 
 type Config struct {
-	Listen      string
-	Token       string
-	Binary      string
-	RuntimeDir  string
-	DatabaseURL string
-	VLESS       *node.VLESS
-	Telemetry   Telemetry
+	TelemetryExportFile string
+	Listen              string
+	Token               string
+	Binary              string
+	RuntimeDir          string
+	DatabaseURL         string
+	VLESS               *node.VLESS
+	Telemetry           Telemetry
 }
 
 func Load() (Config, error) {
@@ -38,6 +39,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg := Config{Listen: envDefault("PULSE_NODE_LISTEN", "127.0.0.1:8080"), Token: token, Binary: envDefault("PULSE_NODE_MIHOMO_BINARY", "/usr/local/bin/mihomo"), RuntimeDir: envDefault("PULSE_NODE_RUNTIME_DIR", "/run/pulse-node")}
+	cfg.TelemetryExportFile = os.Getenv("PULSE_NODE_TELEMETRY_EXPORT_FILE")
 	cfg.Telemetry, err = loadTelemetry(os.Getenv("PULSE_NODE_TELEMETRY_FILE"))
 	if err != nil {
 		return Config{}, err

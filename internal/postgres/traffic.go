@@ -236,7 +236,7 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 	if _, err = tx.Exec(ctx, `INSERT INTO node_traffic_checkpoints(connection_id,user_name,started_at,upload_bytes,download_bytes,last_seen) SELECT id,usr,started,up,down,$6 FROM unnest($1::text[],$2::text[],$3::timestamptz[],$4::bigint[],$5::bigint[]) AS p(id,usr,started,up,down) ON CONFLICT(connection_id,user_name) DO UPDATE SET started_at=excluded.started_at,upload_bytes=excluded.upload_bytes,download_bytes=excluded.download_bytes,last_seen=GREATEST(node_traffic_checkpoints.last_seen,excluded.last_seen)`, acceptedIDs, acceptedUsers, starts, uploads, downloads, sample.ObservedAt); err != nil {
 		return node.ErrUnavailable
 	}
-	if _, err = tx.Exec(ctx, `UPDATE node_traffic_state SET sequence=$1,observed_at=$2,pruned_before=$3,reset_count=$4,skipped_connections=$5 WHERE singleton`, sample.Sequence, sample.ObservedAt, watermark, resets, skipped); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE node_traffic_state SET accounting_sequence=accounting_sequence+1,sequence=$1,observed_at=$2,pruned_before=$3,reset_count=$4,skipped_connections=$5 WHERE singleton`, sample.Sequence, sample.ObservedAt, watermark, resets, skipped); err != nil {
 		return node.ErrUnavailable
 	}
 	return sanitized(tx.Commit(ctx))
@@ -251,7 +251,7 @@ func (s *Store) TrafficTotals(ctx context.Context) (traffic.Totals, error) {
 	}
 	defer tx.Rollback(ctx)
 	result := traffic.Totals{Users: []traffic.UserTotal{}}
-	if err = tx.QueryRow(ctx, `SELECT observed_at,reset_count,skipped_connections FROM node_traffic_state WHERE singleton`).Scan(&result.ObservedAt, &result.ResetCount, &result.SkippedConnections); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT accounting_epoch::text,accounting_sequence,observed_at,reset_count,skipped_connections FROM node_traffic_state WHERE singleton`).Scan(&result.AccountingEpoch, &result.AccountingSequence, &result.ObservedAt, &result.ResetCount, &result.SkippedConnections); err != nil {
 		return traffic.Totals{}, node.ErrUnavailable
 	}
 	rows, err := tx.Query(ctx, `SELECT u.name,u.enabled,COALESCE(t.upload_bytes,0),COALESCE(t.download_bytes,0) FROM node_users u LEFT JOIN node_traffic_totals t ON t.user_name=u.name WHERE NOT u.deleted ORDER BY u.name LIMIT $1`, maxUsers+1)

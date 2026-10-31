@@ -17,20 +17,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
-      - name: Validate release identity
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || (( ${#RELEASE_TAG} > 128 )); then
-            echo 'Expected a version tag such as v0.1.0 or v0.1.0-rc.1' >&2
-            exit 1
-          fi
-          echo "IMAGE=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_ENV"
-          echo "VERSION=$RELEASE_TAG" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.38.1
@@ -44,38 +37,62 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Refuse replacing an existing release
-        run: |
-          if docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null 2> registry-error; then
-            echo 'This version is already published. Release a new version.' >&2
-            exit 1
-          fi
-          if ! grep -qiE 'manifest unknown|name unknown|not found' registry-error; then
-            cat registry-error >&2
-            exit 1
-          fi
-      - name: Publish verified images and multiarch manifest
+      - name: Publish exactly the verified images, then release metadata
         env:
-          SOURCE: https://github.com/${{ github.repository }}
-          REVISION: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          test "$REPOSITORY" = pulse-foundation/pulse-vpn-node
+          IMAGE="ghcr.io/$REPOSITORY"
+          VERSION=${RELEASE_TAG#v}
+          REGISTRY_TAG=$(node scripts/release-manifest.mjs --registry-tag "$RELEASE_TAG")
+          COMMIT=$(git rev-parse HEAD)
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$COMMIT"
+          # A completed publication is immutable, even after a fresh workflow rerun.
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > release.json
+          if jq -e '.assets[] | select(.name == "pulse-node-release.json")' release.json > /dev/null; then
+            echo 'Release metadata already published; refusing replacement. Use a new version.' >&2
+            exit 1
+          fi
+          printf '{"tag":"%s","version":"%s","commit":"%s","verifiedAt":"%s","protocolVersion":1,"schemaVersion":6,"architectures":{}}' \
+            "$RELEASE_TAG" "$VERSION" "$COMMIT" "$(sort verified-images/*.verified-at | tail -1)" > input.json
           digests=()
           for arch in amd64 arm64; do
             docker load --input "verified-images/$arch.tar"
             actual=$(docker image inspect pulse-vpn-node:integration-test --format '{{.Id}}')
             test "$actual" = "$(cat "verified-images/$arch.id")"
-            test "$(docker image inspect pulse-vpn-node:integration-test --format '{{.Os}}/{{.Architecture}}')" = "linux/$arch"
-            staging="$IMAGE:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$arch"
-            docker tag "$actual" "$staging"
-            docker push "$staging"
+            test "$(docker image inspect "$actual" --format '{{.Os}}/{{.Architecture}}')" = "linux/$arch"
+            # Release, commit and architecture identify verified bytes across job retries.
+            staging="$IMAGE:$(node scripts/release-manifest.mjs --staging-tag "$RELEASE_TAG" "$COMMIT" "$arch")"
+            if docker buildx imagetools inspect "$staging" --raw > registry.json 2> registry-error; then
+              test "$(jq -r '.config.digest' registry.json)" = "$actual"
+            else
+              grep -qiE 'manifest unknown|name unknown|not found' registry-error
+              docker tag "$actual" "$staging"
+              docker push "$staging"
+            fi
             digest=$(docker buildx imagetools inspect "$staging" --format '{{.Manifest.Digest}}')
-            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            docker buildx imagetools inspect "$IMAGE@$digest" --raw > registry.json
+            test "$(jq -r '.config.digest' registry.json)" = "$actual"
+            jq --arg arch "$arch" --arg reference "$IMAGE@$digest" --arg imageId "$actual" \
+              --slurpfile build "verified-images/$arch.build.json" \
+              '.architectures[$arch] = ($build[0] + {reference:$reference,imageId:$imageId})' input.json > next.json
+            mv next.json input.json
             digests+=("$IMAGE@$digest")
           done
-          docker buildx imagetools create --tag "$IMAGE:$VERSION" \
-            --annotation "index:org.opencontainers.image.source=$SOURCE" \
-            --annotation "index:org.opencontainers.image.revision=$REVISION" \
-            --annotation "index:org.opencontainers.image.version=$VERSION" \
-            "${digests[@]}"
-          docker buildx imagetools inspect "$IMAGE:$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          node scripts/release-manifest.mjs input.json pulse-node-release.json
+          if docker buildx imagetools inspect "$IMAGE:$REGISTRY_TAG" --raw > index.json 2> registry-error; then
+            for arch in amd64 arm64; do
+              expected=$(jq -r --arg arch "$arch" '.architectures[$arch].reference | split("@")[1]' pulse-node-release.json)
+              test "$(jq -r --arg arch "$arch" '.manifests[] | select(.platform.os=="linux" and .platform.architecture==$arch) | .digest' index.json)" = "$expected"
+            done
+            test "$(jq '.manifests|length' index.json)" = 2
+          else
+            grep -qiE 'manifest unknown|name unknown|not found' registry-error
+            docker buildx imagetools create --tag "$IMAGE:$REGISTRY_TAG" "${digests[@]}"
+          fi
+          # Check both immutable references before the asset becomes the readiness marker.
+          for reference in "${digests[@]}"; do docker buildx imagetools inspect "$reference" > /dev/null; done
+          gh release upload "$RELEASE_TAG" pulse-node-release.json --repo "$REPOSITORY"

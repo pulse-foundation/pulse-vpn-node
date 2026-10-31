@@ -39,6 +39,12 @@ func main() {
 		err = liveTraffic()
 	case "traffic-persist":
 		err = persistedTraffic()
+	case "expiry-before-stop":
+		err = expiryBeforeStop()
+	case "expiry-live":
+		err = liveExpiry()
+	case "expiry-persist":
+		err = persistedExpiry()
 	case "users-live":
 		err = liveUsers()
 	case "users-persist":
@@ -59,7 +65,7 @@ func main() {
 		err = fmt.Errorf("unknown fixture command")
 	}
 	if err != nil {
-		if os.Args[1] == "managed-create-failure" || os.Args[1] == "managed-still-failed" || os.Args[1] == "managed-recovered" || os.Args[1] == "managed-configure" || os.Args[1] == "managed-lifecycle" || os.Args[1] == "managed-persist" || os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
+		if os.Args[1] == "expiry-live" || os.Args[1] == "expiry-persist" || os.Args[1] == "managed-create-failure" || os.Args[1] == "managed-still-failed" || os.Args[1] == "managed-recovered" || os.Args[1] == "managed-configure" || os.Args[1] == "managed-lifecycle" || os.Args[1] == "managed-persist" || os.Args[1] == "telemetry-live" || os.Args[1] == "telemetry-persist" || os.Args[1] == "users-live" || os.Args[1] == "users-persist" || os.Args[1] == "traffic-live" || os.Args[1] == "traffic-persist" {
 			fmt.Println("FAIL: " + err.Error())
 		}
 		fmt.Fprintln(os.Stderr, err)

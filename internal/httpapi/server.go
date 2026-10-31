@@ -21,6 +21,7 @@ type Status struct {
 }
 
 type Capabilities struct {
+	AccessExpiry     bool `json:"accessExpiry"`
 	ConnectionCreate bool `json:"connectionCreate"`
 	UserDelete       bool `json:"userDelete"`
 	UserRotate       bool `json:"userRotate"`
@@ -74,7 +75,7 @@ func NewWithServices(token string, vpnConfigured bool, check func(context.Contex
 			code = http.StatusServiceUnavailable
 		}
 		if managed {
-			status.Capabilities = Capabilities{true, true, true}
+			status.Capabilities = Capabilities{AccessExpiry: services.Users.AccessPolicySupported(), ConnectionCreate: true, UserDelete: true, UserRotate: true}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)

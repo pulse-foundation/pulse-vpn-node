@@ -82,7 +82,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	// The explicit order is the reviewed schema history. Reject gaps, unknown
 	// versions and changed checksums before applying any pending migration.
-	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql"}
+	files := []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql"}
 	rows, err := tx.Query(ctx, "SELECT version,checksum FROM node_schema_migrations ORDER BY version")
 	if err != nil {
 		return node.ErrUnavailable
@@ -162,14 +162,14 @@ func snapshot(ctx context.Context, tx pgx.Tx, revision int64) (node.UserSnapshot
 			return result, node.ErrUnavailable
 		}
 	}
-	rows, err := tx.Query(ctx, "SELECT u.name,u.uuid::text,u.enabled,u.credential_revision,c.runtime_name FROM node_users u JOIN node_user_credentials c ON c.uuid=u.uuid WHERE NOT u.deleted ORDER BY u.name LIMIT $1", maxUsers+1)
+	rows, err := tx.Query(ctx, "SELECT u.name,u.uuid::text,u.enabled,u.credential_revision,c.runtime_name,u.expires_at,u.policy_revision,u.expiry_enforced_revision,u.renewal_revision FROM node_users u JOIN node_user_credentials c ON c.uuid=u.uuid WHERE NOT u.deleted ORDER BY u.name LIMIT $1", maxUsers+1)
 	if err != nil {
 		return node.UserSnapshot{}, node.ErrUnavailable
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var u node.ManagedUser
-		if err := rows.Scan(&u.Name, &u.UUID, &u.Enabled, &u.CredentialRevision, &u.RuntimeName); err != nil {
+		if err := rows.Scan(&u.Name, &u.UUID, &u.Enabled, &u.CredentialRevision, &u.RuntimeName, &u.ExpiresAt, &u.PolicyRevision, &u.ExpiryEnforcedRevision, &u.RenewalRevision); err != nil {
 			return node.UserSnapshot{}, node.ErrUnavailable
 		}
 		result.Users = append(result.Users, u)
@@ -278,6 +278,11 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 	if !keyPattern.MatchString(c.Key) || !namePattern.MatchString(c.Name) || c.ExpectedRevision < 0 || (c.UUID != "" && !validUUID(c.UUID)) || (c.Kind != "" && c.Kind != "delete" && c.Kind != "rotate") || (c.Kind == "delete" && c.UUID != "") || (c.Kind == "rotate" && c.UUID == "") {
 		return node.Operation{}, node.ErrInvalid
 	}
+	if c.AccessPolicy != nil {
+		if (c.Kind != "" && c.Kind != "rotate") || (c.Kind == "rotate" && c.AccessPolicy.Renew) || c.AccessPolicy.Revision < 1 || c.AccessPolicy.ExpiresAt != nil && (c.AccessPolicy.ExpiresAt.Year() < 1 || c.AccessPolicy.ExpiresAt.Year() > 9999) {
+			return node.Operation{}, node.ErrInvalid
+		}
+	}
 	// Explicit fields make the durable hash independent of future domain fields.
 	body, err := json.Marshal(struct {
 		Name, UUID       string
@@ -289,6 +294,10 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 	}
 	if c.Kind != "" {
 		body = append([]byte(c.Kind+":"), body...)
+	}
+	if c.AccessPolicy != nil {
+		policy, _ := json.Marshal(c.AccessPolicy)
+		body = append(append(body, '\n'), policy...)
 	}
 	hash := sha256.Sum256(body)
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
@@ -333,6 +342,11 @@ func (s *Store) Change(ctx context.Context, c node.UserChange) (node.Operation, 
 	}
 	if err = changeUser(ctx, tx, c, revision+1); err != nil {
 		return node.Operation{}, err
+	}
+	if c.AccessPolicy != nil {
+		if err = changeAccessPolicy(ctx, tx, c); err != nil {
+			return node.Operation{}, err
+		}
 	}
 	revision++
 	if _, err = tx.Exec(ctx, "UPDATE node_user_state SET revision=$1 WHERE singleton", revision); err != nil {

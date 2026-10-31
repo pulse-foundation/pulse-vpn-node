@@ -332,6 +332,31 @@ time/count/byte eviction, agent-run changes, and explicit gaps. Check that snaps
 for collectors and that buffer use remains bounded while Pulse is offline.
 Do not probe live VPSs or public targets as part of documentation work or routine tests.
 
+## Local access expiry
+
+Managed nodes advertise `capabilities.accessExpiry` after migration 004. The optional
+`accessPolicy` object on user writes carries a per-user increasing revision, an explicit nullable
+UTC `expiresAt`, and `renew`. Existing `enabled` remains administrative intent. Effective access
+requires enabled intent, a future/unlimited deadline, and no enforced-expiry latch.
+A newer explicit renewal can clear that latch, without overriding a disabled intent. Rotation
+preserves the latch and desired enablement and can atomically advance the associated policy.
+
+The single runtime writer reconciles SQL expiry before applying its first managed listener and on
+each tick. It commits expiry, a global application revision and retained evidence atomically before
+removing credentials, then repeatedly sweeps only affected runtime identities. Deadlines are not
+hard-real-time: normal reconciliation ticks every second; unavailable storage/controller calls and
+bounded retries add latency. A known deadline is also removed from the last attempted runtime
+snapshot during local database failure; pending expiry observations are scoped to the last explicit renewal and carried into SQL recovery.
+A backward UTC correction cannot undo them; an explicit newer renewal supersedes them without
+inheriting an incorrectly advanced clock. A normal restart starts the core idle;
+SQL must be available before any managed credentials are applied. Restoring an older database is a
+separate recovery workflow, not handled by the local restart path.
+
+`GET /api/v1/access-policy/events?after=N` reads one complete retained expiry revision, up to 1024
+users. Consumers commit every event in a page before advancing N. Evidence survives user deletion,
+rotation, renewal, process restart, and eviction of the independent 15-minute telemetry buffer.
+No TTL/pruning is currently enabled. API reads never expose credential material.
+
 ## Alternatives and scope
 
 Embedding Mihomo as a library would couple this project to internal core APIs. A separate executable

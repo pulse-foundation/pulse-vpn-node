@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var ErrConflict = errors.New("user state conflict")
@@ -20,11 +21,15 @@ type UserRuntime interface {
 }
 
 type ManagedUser struct {
-	Name               string `json:"name"`
-	RuntimeName        string `json:"-"`
-	CredentialRevision int64  `json:"credentialRevision"`
-	UUID               string `json:"-"`
-	Enabled            bool   `json:"enabled"`
+	RenewalRevision        int64      `json:"-"`
+	ExpiresAt              *time.Time `json:"expiresAt"`
+	PolicyRevision         int64      `json:"policyRevision"`
+	ExpiryEnforcedRevision int64      `json:"expiryEnforcedRevision"`
+	Name                   string     `json:"name"`
+	RuntimeName            string     `json:"-"`
+	CredentialRevision     int64      `json:"credentialRevision"`
+	UUID                   string     `json:"-"`
+	Enabled                bool       `json:"enabled"`
 }
 type UserSnapshot struct {
 	Revision     int64
@@ -37,7 +42,7 @@ type UserSnapshot struct {
 func (s UserSnapshot) Active() []User {
 	users := []User{}
 	for _, u := range s.Users {
-		if u.Enabled {
+		if enabled, _ := EffectiveAccess(u, time.Now()); enabled {
 			name := u.RuntimeName
 			if name == "" {
 				name = u.Name
@@ -50,7 +55,7 @@ func (s UserSnapshot) Active() []User {
 func (s UserSnapshot) Revoked() []string {
 	names := append([]string{}, s.RevokedNames...)
 	for _, u := range s.Users {
-		if !u.Enabled {
+		if enabled, _ := EffectiveAccess(u, time.Now()); !enabled {
 			name := u.RuntimeName
 			if name == "" {
 				name = u.Name
@@ -65,6 +70,7 @@ func (s UserSnapshot) Revoked() []string {
 // explicit rotation, omitted for enable/disable and deletion. Retired UUIDs are
 // never reused; rotation preserves enabled state and accounting.
 type UserChange struct {
+	AccessPolicy     *AccessPolicyChange
 	Kind             string // empty/update, delete, or rotate
 	Key              string
 	Name             string

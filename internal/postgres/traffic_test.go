@@ -361,13 +361,13 @@ func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
 	}
 	assertTraffic(t, s, 0, 0, 0, 0)
 	var newest int
-	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 3 {
+	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 4 {
 		t.Fatalf("migration version %d %v", newest, err)
 	}
 }
 
 func TestMigrationRejectsUnknownAndGappedHistory(t *testing.T) {
-	for _, version := range []int{4, 0} {
+	for _, version := range []int{5, 0} {
 		t.Run(string(rune('0'+version)), func(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()

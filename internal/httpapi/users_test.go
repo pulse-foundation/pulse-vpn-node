@@ -87,3 +87,19 @@ func TestUserLifecycleRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestAccessPolicyRequiresExplicitUTCDeadlineAndRenewal(t *testing.T) {
+	for _, raw := range []string{`null`, `{}`, `{"revision":1,"renew":false}`, `{"revision":1,"expiresAt":null}`, `{"revision":1,"expiresAt":"2026-10-31T00:00:00+03:00","renew":false}`, `{"revision":1,"expiresAt":null,"renew":false,"secret":"hidden"}`} {
+		if _, err := decodeAccessPolicy([]byte(raw)); err == nil {
+			t.Errorf("invalid policy accepted")
+		}
+	}
+	policy, err := decodeAccessPolicy([]byte(`{"revision":2,"expiresAt":"2026-10-31T00:00:00Z","renew":false}`))
+	if err != nil || policy.Revision != 2 || policy.ExpiresAt == nil {
+		t.Fatal("valid finite policy rejected")
+	}
+	policy, err = decodeAccessPolicy([]byte(`{"revision":3,"expiresAt":null,"renew":true}`))
+	if err != nil || policy.ExpiresAt != nil || !policy.Renew {
+		t.Fatal("explicit unlimited renewal rejected")
+	}
+}

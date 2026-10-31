@@ -207,3 +207,32 @@ publication; the first authorized release will exercise those external steps.
 - [Telemetry and catch-up API](docs/telemetry.md)
 - [HTTP contract](api/openapi.yaml)
 - [Go conventions](docs/go-conventions.md), [agent rules](AGENTS.md), [GNU GPLv3](LICENSE)
+
+### Optional telemetry delivery
+
+Collection stays in bounded RAM even without enrollment. Set
+`PULSE_NODE_TELEMETRY_EXPORT_FILE` to an absolute path in a dedicated read-only
+**directory** mount (the standard Compose uses `/run/pulse-telemetry/enrollment.json`).
+Provision that host directory with mode 0700 and UID/GID 10001; write the file
+atomically, mode 0600 and UID/GID 10001. Do not bind an individual file: atomic
+replacement must become visible without restarting the agent or VPN core.
+
+The private JSON contains `schemaVersion: 1`, `endpoint` (HTTPS origin on port 443
+plus `/api/v1/node-ingest`), `enrollmentGeneration` (UUID), and `credential`
+(a separate scoped bearer credential, never the Node management token). Enrollment
+is explicit; `init` does not invent a receiver or sender identity. Missing file
+disables delivery. Invalid files stop only delivery and expose a safe status code.
+The watcher reloads within five seconds, cancels and joins the previous sender,
+and resumes the same telemetry run and acknowledged sequences after rotation.
+
+The receiver contract uses `/runs`, `/heartbeat`, `/samples` with schema version 1,
+decimal uint64 sequences and committed ACKs. Heartbeat runs every 30 seconds
+with ±3 seconds jitter independently of history retries. Pages are limited to 64
+records/512 KiB; retry backoff is 1–60 seconds and retained history stays bounded
+by the existing 15-minute RAM buffer. Redirects, proxies, loopback/link-local
+receiver destinations and invalid TLS certificates are rejected. DNS addresses
+are checked at each dial. Receiver failures do not stop sampling or VPN service.
+Configure explicit permitted direct probe targets in the telemetry file; the
+generic example intentionally does not contact third-party targets by default.
+`/api/v1/status` reports `capabilities.telemetryPushVersion` and cached
+`telemetryDelivery`; it never returns the private enrollment or receiver address.

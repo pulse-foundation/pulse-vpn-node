@@ -709,14 +709,33 @@ components:
               type: boolean
             userRotate:
               type: boolean
+            telemetryPushVersion:
+              type: integer
+              enum: [0, 1]
+              description: Version 1 supports private file enrollment and push; 0 means no file watcher configured
             accessExpiry:
               type: boolean
               description: Supports durable local expiry and access-policy event reconciliation
+        telemetryDelivery:
+          $ref: '#/components/schemas/TelemetryDelivery'
         core:
           type: object
           properties:
             version:
               type: string
+    TelemetryDelivery:
+      type: object
+      description: Cached exporter diagnostics; never includes destination or credential. Export failure does not alter VPN readiness.
+      required: [configured, committedSequence, heartbeatSequence]
+      properties:
+        configured: {type: boolean}
+        configurationError: {type: string}
+        registrationError: {type: string}
+        heartbeatError: {type: string}
+        historyError: {type: string}
+        lastHeartbeatAt: {type: string, format: date-time}
+        committedSequence: {$ref: '#/components/schemas/TelemetrySequence'}
+        heartbeatSequence: {$ref: '#/components/schemas/TelemetrySequence'}
     AccessPolicyChange:
       type: object
       additionalProperties: false

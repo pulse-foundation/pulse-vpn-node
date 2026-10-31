@@ -74,10 +74,17 @@ services:
       PULSE_NODE_VLESS_FILE: /fixtures/server.json
       PULSE_NODE_DATABASE_URL_FILE: /fixtures/database-url
       PULSE_NODE_TELEMETRY_FILE: /fixtures/telemetry.json
+      PULSE_NODE_TELEMETRY_EXPORT_FILE: /fixtures/telemetry-enrollment.json
       SSL_CERT_FILE: /fixtures/target.crt
     secrets: !reset []
     ports: !reset []
-    volumes: ["fixtures:/fixtures:ro"]
+    volumes: !override
+      - fixtures:/fixtures:ro
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+      - /proc/uptime:/host/proc/uptime:ro
+      - /proc/diskstats:/host/proc/diskstats:ro
     restart: "no"
     networks: [default, back]
     depends_on:

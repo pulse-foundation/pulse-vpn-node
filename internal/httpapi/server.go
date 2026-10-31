@@ -14,17 +14,19 @@ import (
 )
 
 type Status struct {
-	Capabilities  Capabilities `json:"capabilities"`
-	Status        string       `json:"status"`
-	VPNConfigured bool         `json:"vpnConfigured"`
-	Core          CoreStatus   `json:"core"`
+	TelemetryDelivery *telemetry.ExportStatus `json:"telemetryDelivery,omitempty"`
+	Capabilities      Capabilities            `json:"capabilities"`
+	Status            string                  `json:"status"`
+	VPNConfigured     bool                    `json:"vpnConfigured"`
+	Core              CoreStatus              `json:"core"`
 }
 
 type Capabilities struct {
-	AccessExpiry     bool `json:"accessExpiry"`
-	ConnectionCreate bool `json:"connectionCreate"`
-	UserDelete       bool `json:"userDelete"`
-	UserRotate       bool `json:"userRotate"`
+	TelemetryPushVersion int  `json:"telemetryPushVersion"`
+	AccessExpiry         bool `json:"accessExpiry"`
+	ConnectionCreate     bool `json:"connectionCreate"`
+	UserDelete           bool `json:"userDelete"`
+	UserRotate           bool `json:"userRotate"`
 }
 
 type CoreStatus struct {
@@ -45,12 +47,13 @@ func NewWithTraffic(token string, vpnConfigured bool, check func(context.Context
 }
 
 type Services struct {
-	StartupVLESS   *node.VLESS
-	Users          *node.UserManager
-	Traffic        trafficReader
-	Telemetry      *telemetry.Buffer
-	SampleInterval time.Duration
-	ProbeInterval  time.Duration
+	TelemetryDelivery interface{ Status() telemetry.ExportStatus }
+	StartupVLESS      *node.VLESS
+	Users             *node.UserManager
+	Traffic           trafficReader
+	Telemetry         *telemetry.Buffer
+	SampleInterval    time.Duration
+	ProbeInterval     time.Duration
 }
 
 func NewWithServices(token string, vpnConfigured bool, check func(context.Context) (string, error), services Services) http.Handler {
@@ -76,6 +79,12 @@ func NewWithServices(token string, vpnConfigured bool, check func(context.Contex
 		}
 		if managed {
 			status.Capabilities = Capabilities{AccessExpiry: services.Users.AccessPolicySupported(), ConnectionCreate: true, UserDelete: true, UserRotate: true}
+		}
+
+		if services.TelemetryDelivery != nil {
+			status.Capabilities.TelemetryPushVersion = 1
+			delivery := services.TelemetryDelivery.Status()
+			status.TelemetryDelivery = &delivery
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)

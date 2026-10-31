@@ -2,42 +2,87 @@ package main
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"net"
-	"strings"
-	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-// TCP and UDP are independent cleanup boundaries. Closing the TCP peer before
-// the first UDP exchange deliberately reproduces a sweep that has not yet
-// reached the UDP tracker; no scheduler timing or Docker core is required.
-func TestRevokedWaitsForUDPAfterTCPClosure(t *testing.T) {
-	var packets atomic.Int32
-	s := revocationSessions(t, func(packet []byte) []byte {
-		if packets.Add(1) == 1 {
-			return packet
+// Exercise retry timing with virtual time; the Docker Users/Expiry/Managed
+// scenarios still prove TCP and UDP revocation through the real core/client.
+func TestUDPRevocationWaitsForTransientTransfer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		probes := 0
+		err := awaitUDPRevocation(func(deadline time.Time) error {
+			probes++
+			if probes == 1 {
+				return nil
+			}
+			time.Sleep(time.Until(deadline))
+			return fmt.Errorf("read: %w", errUDPEchoTimeout)
+		})
+		if err != nil {
+			t.Fatalf("transient UDP transfer was rejected: %v", err)
 		}
-		return nil
+		if probes != 2 || time.Since(started) != 3100*time.Millisecond {
+			t.Fatalf("did not retry and observe a full quiet interval: probes=%d elapsed=%v", probes, time.Since(started))
+		}
 	})
-	if err := s.revoked(); err != nil {
-		t.Fatalf("TCP closed before UDP cleanup completed: %v", err)
-	}
-	if packets.Load() < 2 {
-		t.Fatal("did not observe UDP cessation after the transient echo")
+}
+
+func TestUDPRevocationRejectsPersistentTransfer(t *testing.T) {
+	for _, latency := range []time.Duration{0, 2900 * time.Millisecond} {
+		t.Run(latency.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				started := time.Now()
+				probes := 0
+				err := awaitUDPRevocation(func(deadline time.Time) error {
+					probes++
+					if time.Until(deadline) != 3*time.Second || deadline.After(started.Add(10*time.Second)) {
+						t.Fatal("probe must retain its full timeout within the cleanup window")
+					}
+					time.Sleep(latency)
+					return nil
+				})
+				if !errors.Is(err, errUDPStillTransfers) {
+					t.Fatalf("persistent UDP transfer was not rejected: %v", err)
+				}
+				if elapsed := time.Since(started); probes < 2 || elapsed < 7*time.Second || elapsed > 10*time.Second {
+					t.Fatalf("unexpected cleanup budget: probes=%d elapsed=%v", probes, elapsed)
+				}
+			})
+		})
 	}
 }
 
-func TestRevokedRejectsPersistentUDPTransfer(t *testing.T) {
-	s := revocationSessions(t, func(packet []byte) []byte { return packet })
-	started := time.Now()
-	err := s.revoked()
-	if err == nil || !strings.Contains(err.Error(), "still transfers") {
-		t.Fatalf("persistent UDP transfer was not rejected: %v", err)
-	}
-	if time.Since(started) > 11*time.Second {
-		t.Fatal("UDP revocation assertion exceeded its bounded deadline")
-	}
+func TestUDPRevocationAllowsQuietIntervalEndingAtCleanupDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		err := awaitUDPRevocation(func(deadline time.Time) error {
+			if time.Since(started) < 7*time.Second {
+				return nil
+			}
+			time.Sleep(time.Until(deadline))
+			return errUDPEchoTimeout
+		})
+		if err != nil || time.Since(started) != 10*time.Second {
+			t.Fatalf("full quiet interval at cleanup deadline was rejected: err=%v elapsed=%v", err, time.Since(started))
+		}
+	})
+}
+
+func TestUDPRevocationPreservesProbeFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		failure := errors.New("probe transport unavailable")
+		started := time.Now()
+		err := awaitUDPRevocation(func(time.Time) error { return failure })
+		if !errors.Is(err, failure) || time.Since(started) != 0 {
+			t.Fatalf("probe failure must return immediately with its cause: %v", err)
+		}
+	})
 }
 
 func TestRevokedRejectsUDPProbeFaults(t *testing.T) {

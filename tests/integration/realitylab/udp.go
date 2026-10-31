@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
+const udpEchoTimeout = 3 * time.Second
+
 var errUDPEchoTimeout = errors.New("UDP echo timed out")
+var errUDPStillTransfers = errors.New("revoked UDP association still transfers")
 
 type udpSession struct {
 	control net.Conn
@@ -77,7 +80,7 @@ func openUDP(proxy string) (_ *udpSession, resultErr error) {
 	return &udpSession{control: control, conn: conn}, nil
 }
 func (s *udpSession) echo() error {
-	return s.echoUntil(time.Now().Add(3 * time.Second))
+	return s.echoUntil(time.Now().Add(udpEchoTimeout))
 }
 
 func (s *udpSession) echoUntil(deadline time.Time) error {
@@ -131,13 +134,17 @@ func (s *udpSession) echoUntil(deadline time.Time) error {
 // bounded cleanup window. A shortened final timeout or a probe fault cannot
 // establish cessation of transfer.
 func (s *udpSession) revoked() error {
+	return awaitUDPRevocation(s.echoUntil)
+}
+
+func awaitUDPRevocation(probe func(time.Time) error) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		probeDeadline := time.Now().Add(3 * time.Second)
+		probeDeadline := time.Now().Add(udpEchoTimeout)
 		if probeDeadline.After(deadline) {
-			return errors.New("revoked UDP association still transfers")
+			return errUDPStillTransfers
 		}
-		err := s.echoUntil(probeDeadline)
+		err := probe(probeDeadline)
 		if errors.Is(err, errUDPEchoTimeout) {
 			return nil
 		}

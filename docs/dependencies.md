@@ -5,7 +5,7 @@ No core code is embedded or copied into the agent module. Dockerfile pins all in
 
 | Component | Version / source |
 | --- | --- |
-| Go toolchain | 1.26.10, from the pinned `golang:1.26-bookworm` image |
+| Go toolchain | 1.27.3, from the pinned `golang:1.27-bookworm` image |
 | Mihomo | [v1.19.33 source](https://github.com/MetaCubeX/mihomo/tree/v1.19.33), binary from the pinned `metacubex/mihomo:v1.19.33` image |
 | Runtime base | Pinned `alpine:3.24` image |
 
@@ -19,7 +19,9 @@ Alpine packages retain their respective licenses. The agent is GPLv3; see `LICEN
 This is a local development image, not a published release. Before distribution, package the required
 license notices and corresponding-source materials for the exact shipped dependencies and build.
 For a core/toolchain upgrade, update pins, runtime version verification and compatibility evidence
-together. A successful idle startup is not evidence of VLESS/REALITY compatibility.
+together. CI selects Go from `go.mod`; both Docker builders check their actual Go version against
+that same directive before building. Update the module and both image pins together. A successful
+idle startup is not evidence of VLESS/REALITY compatibility.
 
 The local VLESS/REALITY acceptance test uses v1.19.33 for both server and client, raw TCP + Vision,
 and XUDP. It verifies HTTP/HTTPS payload integrity, UDP echo, invalid credentials, occupied-port

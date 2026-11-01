@@ -21,8 +21,8 @@ before the node starts. Users, traffic and telemetry do not require separate Com
 The agent retains its low-level idle/file-only modes, but these are not the standard launch path.
 
 Requires Docker with **Compose 2.24.4 or newer** (`!override` / `!reset` support).
-Running the node needs no host Go installation; integration tests require Go 1.26.10.
-Go 1.26.10, Mihomo v1.19.33 and image inputs are pinned;
+Running the node needs no host Go installation; integration tests require Go 1.27.3.
+Go 1.27.3, Mihomo v1.19.33 and image inputs are pinned;
 see [dependencies](docs/dependencies.md). GitHub Actions publishes versioned multi-platform images
 to `ghcr.io/pulse-foundation/pulse-vpn-node` when a release is published. Select an explicit release
 tag via `PULSE_NODE_IMAGE`; use `pulse-vpn-node:local` for a local source build.

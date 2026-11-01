@@ -1,8 +1,9 @@
 FROM metacubex/mihomo:v1.19.33@sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c AS core
-FROM golang:1.26-bookworm@sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb AS check
+FROM golang:1.27-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS check
 WORKDIR /src
 ENV GOTOOLCHAIN=local
 COPY go.mod go.sum ./
+RUN test "$(go env GOVERSION)" = "go$(sed -n 's/^go //p' go.mod)"
 RUN go mod download
 ENV GOPROXY=off
 COPY cmd ./cmd

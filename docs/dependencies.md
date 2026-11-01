@@ -46,14 +46,36 @@ and update the corresponding source/license references after compatibility tests
 
 The shared verification workflow runs pinned govulncheck against the agent source and Trivy against
 the exact tested node image (including the Mihomo binary) and the PostgreSQL image from Compose.
-High/Critical image findings, unfixed findings and scanner failures block publication before any
-image upload. Use ordinary GitHub Actions failure notifications; no daemon on the VPS is added.
+The unfiltered JSON inventories and readable High/Critical reports are saved as
+`security-reports-amd64` and `security-reports-arm64` artifacts for 30 days, including failed runs.
+High/Critical counts appear in the job summary and workflow warnings.
+
+For the Node image we build, the gate blocks High/Critical **OS package** findings with a vendor fix available, using
+Trivy's native `--pkg-types os --ignore-unfixed` filters only for the gate. The full inventory is
+not filtered. Scanner, registry, database and report failures remain fatal before image upload.
+The agent's source and transitive dependencies remain protected by mandatory govulncheck.
+
+Findings inside ready-made upstream binaries (Mihomo) and unfixed OS advisories are review
+items, not automatic release blockers. The ready-made PostgreSQL service image is fully scanned
+in advisory mode, including OS findings: a fixed distro package does not mean a compatible
+updated vendor image has been published. The workflow explicitly selects `built-image` for
+Node and `upstream-image` for PostgreSQL; unknown modes fail. Do not classify our Node build
+as upstream to bypass the OS gate. A fixed Go library version does
+not mean a compatible fixed Mihomo binary has been released. Do not fork the core or override
+its dependencies just to satisfy the inventory scanner. There are no per-CVE baselines, expiry
+extensions, blanket ignore files or continue-on-error bypasses.
+
+Review weekly reports even when CI is green: new Critical findings, applicable remotely
+exploitable issues and available vendor fixes need prompt triage and may require holding a
+release. Passing CI means the automated gates passed, not that the complete image is free of
+known vulnerabilities. GitHub Actions failure notifications cover blocking findings and scanner
+errors; advisory warnings alone do not generate failure notifications. No VPS daemon is added.
+Run `node --test scripts/scan-image.test.mjs` to check gate failure and report preservation.
 
 On 2026-11-01, refreshed Alpine 3.22 and the agent dependencies scan clean, but current stable
-Mihomo 1.19.33 and the PostgreSQL image's bundled `gosu` executable still have dependency findings. Consequently the security gate is expected to
-fail until an upstream update or evidence-backed triage resolves them. There is no blanket ignore
-for the core and no local fork to force dependency overrides. Passing functional tests alone does
-not make the image security gate pass.
+Mihomo 1.19.33 and the PostgreSQL image's bundled `gosu` executable still have dependency findings. These findings remain visible in the advisory reports and no longer fail every release.
+They are not declared safe or suppressed. Functional tests and the blocking checks above still
+run before the exact verified image can be published.
 
 The PostgreSQL service is a separate image: changing the Node release alone does not update it.
 Consumers that generate their own Compose must adopt the reviewed database digest separately.

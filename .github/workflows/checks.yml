@@ -46,7 +46,7 @@ jobs:
           echo "NODE_VERSION=$version" >> "$GITHUB_ENV"
           echo "NODE_COMMIT=$commit" >> "$GITHUB_ENV"
       - name: Test release tooling
-        run: node --test scripts/release-manifest.test.mjs
+        run: node --test scripts/release-manifest.test.mjs scripts/scan-image.test.mjs
       - name: Check native Docker platform
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
@@ -64,10 +64,17 @@ jobs:
           database=$(awk '$1 == "image:" && $2 ~ /^postgres:/ {print $2}' compose.yaml)
           test -n "$database"
           status=0
-          for image in pulse-vpn-node:integration-test "$database"; do
-            trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --timeout 10m "$image" || status=1
-          done
+          bash scripts/scan-image.sh pulse-vpn-node:integration-test "$RUNNER_TEMP/security-reports/node" built-image || status=1
+          bash scripts/scan-image.sh "$database" "$RUNNER_TEMP/security-reports/postgres" upstream-image || status=1
           exit "$status"
+      - name: Save full security inventories and readable reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-reports-${{ matrix.arch }}
+          path: ${{ runner.temp }}/security-reports/
+          retention-days: 30
+          if-no-files-found: warn
       - name: Save the verified image
         if: inputs.save-images
         env:

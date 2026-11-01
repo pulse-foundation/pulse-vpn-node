@@ -36,3 +36,24 @@ GitHub Actions dependencies are pinned by full commit SHA in `.github/workflows/
 comments identify the reviewed release; update both the SHA and comment together. The publication
 job uses Docker Buildx v0.38.1. Native Ubuntu 24.04 runners cover amd64 and arm64; their managed OS
 images are updated by GitHub. Local workflow syntax was checked with actionlint v1.7.12.
+
+## Automated security checks
+
+Dependabot proposes weekly Go module, Docker and GitHub Actions updates. The CI workflow also
+runs every Monday and can be started manually; scheduled runs use the default branch. Updates
+are reviewed, never automatically merged or deployed. Keep the server/client Mihomo pins aligned
+and update the corresponding source/license references after compatibility tests.
+
+The shared verification workflow runs pinned govulncheck against the agent source and Trivy against
+the exact tested node image (including the Mihomo binary) and the PostgreSQL image from Compose.
+High/Critical image findings, unfixed findings and scanner failures block publication before any
+image upload. Use ordinary GitHub Actions failure notifications; no daemon on the VPS is added.
+
+On 2026-11-01, refreshed Alpine 3.22 and the agent dependencies scan clean, but current stable
+Mihomo 1.19.33 and the PostgreSQL image's bundled `gosu` executable still have dependency findings. Consequently the security gate is expected to
+fail until an upstream update or evidence-backed triage resolves them. There is no blanket ignore
+for the core and no local fork to force dependency overrides. Passing functional tests alone does
+not make the image security gate pass.
+
+The PostgreSQL service is a separate image: changing the Node release alone does not update it.
+Consumers that generate their own Compose must adopt the reviewed database digest separately.

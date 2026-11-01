@@ -29,6 +29,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Check reachable agent vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: Resolve build identity
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -53,6 +55,19 @@ jobs:
           docker compose version
       - name: Build and verify the complete node
         run: go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -build-version="$NODE_VERSION" -build-commit="$NODE_COMMIT"
+      - uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.76.1
+      - name: Scan the verified image and its PostgreSQL service
+        shell: bash
+        run: |
+          database=$(awk '$1 == "image:" && $2 ~ /^postgres:/ {print $2}' compose.yaml)
+          test -n "$database"
+          status=0
+          for image in pulse-vpn-node:integration-test "$database"; do
+            trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --timeout 10m "$image" || status=1
+          done
+          exit "$status"
       - name: Save the verified image
         if: inputs.save-images
         env:

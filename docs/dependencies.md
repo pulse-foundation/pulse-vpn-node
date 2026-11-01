@@ -7,7 +7,7 @@ No core code is embedded or copied into the agent module. Dockerfile pins all in
 | --- | --- |
 | Go toolchain | 1.26.10, from the pinned `golang:1.26-bookworm` image |
 | Mihomo | [v1.19.33 source](https://github.com/MetaCubeX/mihomo/tree/v1.19.33), binary from the pinned `metacubex/mihomo:v1.19.33` image |
-| Runtime base | Pinned `alpine:3.22` image |
+| Runtime base | Pinned `alpine:3.24` image |
 
 Mihomo's source archive for this version is available at
 [v1.19.33 archive](https://github.com/MetaCubeX/mihomo/archive/refs/tags/v1.19.33.tar.gz).

@@ -6,7 +6,7 @@ launch includes PostgreSQL-backed [live users](live-users.md); direct file-only 
 
 ## Reproducible connection test
 
-From the repository root, with Docker Compose and Go 1.26.10 available:
+From the repository root, with Docker Compose and Go 1.27.3 available:
 
 ```sh
 go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/Reality$'

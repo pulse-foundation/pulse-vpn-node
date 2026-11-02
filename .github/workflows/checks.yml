@@ -41,7 +41,7 @@ jobs:
           if [[ -n "$RELEASE_TAG" ]]; then
             test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$commit"
             version=${RELEASE_TAG#v}
-            node --input-type=module -e 'import {createManifest} from "./scripts/release-manifest.mjs"; const v=process.env.RELEASE_TAG.slice(1); createManifest({tag:process.env.RELEASE_TAG,version:v,commit:"a".repeat(40),verifiedAt:new Date().toISOString(),protocolVersion:1,schemaVersion:6,architectures:Object.fromEntries(["amd64","arm64"].map(architecture=>[architecture,{version:v,commit:"a".repeat(40),architecture,reference:"ghcr.io/pulse-foundation/pulse-vpn-node@sha256:"+"1".repeat(64),imageId:"sha256:"+"2".repeat(64)}]))})'
+            node --input-type=module -e 'import {createManifest} from "./scripts/release-manifest.mjs"; const v=process.env.RELEASE_TAG.slice(1); createManifest({tag:process.env.RELEASE_TAG,version:v,commit:"a".repeat(40),verifiedAt:new Date().toISOString(),protocolVersion:1,schemaVersion:7,architectures:Object.fromEntries(["amd64","arm64"].map(architecture=>[architecture,{version:v,commit:"a".repeat(40),architecture,reference:"ghcr.io/pulse-foundation/pulse-vpn-node@sha256:"+"1".repeat(64),imageId:"sha256:"+"2".repeat(64)}]))})'
           fi
           echo "NODE_VERSION=$version" >> "$GITHUB_ENV"
           echo "NODE_COMMIT=$commit" >> "$GITHUB_ENV"

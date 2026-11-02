@@ -84,6 +84,12 @@ func (c *Collector) ExportSnapshot() *View {
 	}
 	copy := *c.exported
 	copy.Users = append([]UserTotal{}, copy.Users...)
+	for i := range copy.Users {
+		if activity := copy.Users[i].LastActivityAt; activity != nil {
+			value := *activity
+			copy.Users[i].LastActivityAt = &value
+		}
+	}
 	copy.Stale = copy.ObservedAt == nil || time.Since(*copy.ObservedAt) > 5*PollInterval
 	return &copy
 }

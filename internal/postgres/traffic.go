@@ -229,8 +229,16 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 		totalDownloads = append(totalDownloads, inc.download)
 	}
 	// PostgreSQL bigint arithmetic rejects overflow, rolling back the entire
-	// observation, including pruning, counters, checkpoints and sequence.
-	if _, err = tx.Exec(ctx, `INSERT INTO node_traffic_totals(user_name,upload_bytes,download_bytes) SELECT * FROM unnest($1::text[],$2::bigint[],$3::bigint[]) ON CONFLICT(user_name) DO UPDATE SET upload_bytes=node_traffic_totals.upload_bytes+excluded.upload_bytes,download_bytes=node_traffic_totals.download_bytes+excluded.download_bytes`, totalUsers, totalUploads, totalDownloads); err != nil {
+	// observation, including pruning, counters, activity, checkpoints and sequence.
+	// Only accepted positive deltas establish activity. GREATEST preserves the
+	// previous date for idle samples and backward wall-clock adjustments.
+	if _, err = tx.Exec(ctx, `INSERT INTO node_traffic_totals(user_name,upload_bytes,download_bytes,last_activity_at)
+		SELECT usr,up,down,CASE WHEN up>0 OR down>0 THEN $4::timestamptz END
+		FROM unnest($1::text[],$2::bigint[],$3::bigint[]) AS p(usr,up,down)
+		ON CONFLICT(user_name) DO UPDATE SET
+		upload_bytes=node_traffic_totals.upload_bytes+excluded.upload_bytes,
+		download_bytes=node_traffic_totals.download_bytes+excluded.download_bytes,
+		last_activity_at=GREATEST(node_traffic_totals.last_activity_at,excluded.last_activity_at)`, totalUsers, totalUploads, totalDownloads, sample.ObservedAt); err != nil {
 		return node.ErrUnavailable
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO node_traffic_checkpoints(connection_id,user_name,started_at,upload_bytes,download_bytes,last_seen) SELECT id,usr,started,up,down,$6 FROM unnest($1::text[],$2::text[],$3::timestamptz[],$4::bigint[],$5::bigint[]) AS p(id,usr,started,up,down) ON CONFLICT(connection_id,user_name) DO UPDATE SET started_at=excluded.started_at,upload_bytes=excluded.upload_bytes,download_bytes=excluded.download_bytes,last_seen=GREATEST(node_traffic_checkpoints.last_seen,excluded.last_seen)`, acceptedIDs, acceptedUsers, starts, uploads, downloads, sample.ObservedAt); err != nil {
@@ -254,13 +262,13 @@ func (s *Store) TrafficTotals(ctx context.Context) (traffic.Totals, error) {
 	if err = tx.QueryRow(ctx, `SELECT accounting_epoch::text,accounting_sequence,observed_at,reset_count,skipped_connections FROM node_traffic_state WHERE singleton`).Scan(&result.AccountingEpoch, &result.AccountingSequence, &result.ObservedAt, &result.ResetCount, &result.SkippedConnections); err != nil {
 		return traffic.Totals{}, node.ErrUnavailable
 	}
-	rows, err := tx.Query(ctx, `SELECT u.name,u.enabled,COALESCE(t.upload_bytes,0),COALESCE(t.download_bytes,0) FROM node_users u LEFT JOIN node_traffic_totals t ON t.user_name=u.name WHERE NOT u.deleted ORDER BY u.name LIMIT $1`, maxUsers+1)
+	rows, err := tx.Query(ctx, `SELECT u.name,u.enabled,COALESCE(t.upload_bytes,0),COALESCE(t.download_bytes,0),t.last_activity_at FROM node_users u LEFT JOIN node_traffic_totals t ON t.user_name=u.name WHERE NOT u.deleted ORDER BY u.name LIMIT $1`, maxUsers+1)
 	if err != nil {
 		return traffic.Totals{}, node.ErrUnavailable
 	}
 	for rows.Next() {
 		var user traffic.UserTotal
-		if err = rows.Scan(&user.Name, &user.Enabled, &user.UploadBytes, &user.DownloadBytes); err != nil {
+		if err = rows.Scan(&user.Name, &user.Enabled, &user.UploadBytes, &user.DownloadBytes, &user.LastActivityAt); err != nil {
 			rows.Close()
 			return traffic.Totals{}, node.ErrUnavailable
 		}

@@ -16,7 +16,7 @@ export function stagingTag(tag,commit,architecture) {
 }
 export function createManifest(input) {
  const {tag,version,commit,verifiedAt,protocolVersion,schemaVersion} = input;
- if (typeof version !== 'string' || version.length>64 || !semver.test(version) || tag !== 'v'+version || !/^[a-f0-9]{40}$/.test(commit) || !Number.isFinite(Date.parse(verifiedAt)) || protocolVersion!==1 || schemaVersion!==6) throw Error('invalid release identity');
+ if (typeof version !== 'string' || version.length>64 || !semver.test(version) || tag !== 'v'+version || !/^[a-f0-9]{40}$/.test(commit) || !Number.isFinite(Date.parse(verifiedAt)) || protocolVersion!==1 || schemaVersion!==7) throw Error('invalid release identity');
  const architectures = {};
  for(const arch of ['amd64','arm64']) {
   const image=input.architectures?.[arch];

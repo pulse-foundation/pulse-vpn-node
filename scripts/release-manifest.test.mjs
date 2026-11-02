@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createManifest, assertSameRelease } from './release-manifest.mjs';
 const hash = c => 'sha256:' + c.repeat(64);
-const input = () => ({tag:'v1.2.3',version:'1.2.3',commit:'a'.repeat(40),verifiedAt:'2026-10-31T00:00:00Z',protocolVersion:1,schemaVersion:6,architectures:Object.fromEntries(['amd64','arm64'].map((arch,i)=>[arch,{reference:'ghcr.io/pulse-foundation/pulse-vpn-node@'+hash(String(i+1)),imageId:hash(String(i+3)),version:'1.2.3',commit:'a'.repeat(40),architecture:arch}]))});
+const input = () => ({tag:'v1.2.3',version:'1.2.3',commit:'a'.repeat(40),verifiedAt:'2026-10-31T00:00:00Z',protocolVersion:1,schemaVersion:7,architectures:Object.fromEntries(['amd64','arm64'].map((arch,i)=>[arch,{reference:'ghcr.io/pulse-foundation/pulse-vpn-node@'+hash(String(i+1)),imageId:hash(String(i+3)),version:'1.2.3',commit:'a'.repeat(40),architecture:arch}]))});
 test('creates public manifest retaining separate registry digest and config ID',()=>{const m=createManifest(input());assert.equal(m.formatVersion,1);assert.notEqual(m.architectures.amd64.reference.split('@')[1],m.architectures.amd64.imageId);assert.equal(m.version,'1.2.3');});
 test('requires both architectures',()=>{const x=input();delete x.architectures.arm64;assert.throws(()=>createManifest(x));});
 for(const key of ['version','commit','architecture']) test('rejects image mismatch '+key,()=>{const x=input();x.architectures.amd64[key]='wrong';assert.throws(()=>createManifest(x));});
@@ -82,3 +82,5 @@ test('the same release identity still rejects changed verified bytes',()=>{
  changed.architectures.amd64.reference='ghcr.io/pulse-foundation/pulse-vpn-node@'+hash('9');
  assert.throws(()=>assertSameRelease(published,createManifest(changed)),/published release identity conflict/);
 });
+
+test('rejects a release advertising the previous database schema',()=>{const x=input();x.schemaVersion=6;assert.throws(()=>createManifest(x));});

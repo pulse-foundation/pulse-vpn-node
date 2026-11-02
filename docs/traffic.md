@@ -20,7 +20,7 @@ consumers do not silently lose integer precision. The OpenAPI contract is in `ap
   "state": "collecting",
   "stale": false,
   "observedAt": "2026-10-30T12:00:00Z",
-  "users": [{"name": "example", "enabled": true, "uploadBytes": "1024", "downloadBytes": "8192"}],
+  "users": [{"name": "example", "enabled": true, "uploadBytes": "1024", "downloadBytes": "8192", "lastActivityAt": "2026-10-30T11:59:58Z"}],
   "resetCount": "0",
   "skippedConnections": 0
 }
@@ -36,6 +36,28 @@ error without refreshing the observation time. `stale` becomes true if there is 
 is older than ten seconds. Recent saved data can remain non-stale while the collector reports degraded.
 An unavailable database or unconfigured accounting returns HTTP 503, not zeros. Core readiness remains
 separate on `/api/v1/status`.
+
+Each user's `lastActivityAt` is the latest committed observation time at which an accepted
+upload or download byte delta was positive. A newly observed connection with positive counters
+also counts; its timestamp is when Node observed it, not when those packets were sent.
+Idle/zero-byte connections, discarded samples, unknown attribution and pure counter rebaselines
+do not advance it. A positive delta in either direction counts even when the other direction resets.
+The value is an RFC3339 timestamp or explicit `null` when no activity has been recorded. It is
+independent of the snapshot-wide `observedAt` and does not indicate online/offline status.
+
+Migration `007_last_activity.sql` adds the nullable field without reconstructing historical activity
+from old totals or checkpoints. Apply migrations through the normal managed Compose upgrade.
+The date is committed atomically with traffic totals and survives core/container restart, checkpoint
+pruning, credential rotation and disabling access. Like totals, a deleted identity's date remains
+hidden and is retained if that stable name is recreated. Backward clock changes never lower it.
+Logical backups now use schema 7; restoring a schema-6 backup is supported with unknown activity.
+Older Node versions cannot restore schema-7 backups or operate on the upgraded database.
+
+The same user field is included in the heartbeat's `trafficSnapshot` sent to Pulse. The panel must
+ingest and display it; Node does not add UI. Treat it as approximate observed activity: background
+traffic counts, shared credentials combine devices, short-lived connections may be missed, and
+database/collection outages can delay or lose observations. `null` does not prove the user never
+used VPN, especially for users that existed before this migration.
 
 ## Collection and recovery
 

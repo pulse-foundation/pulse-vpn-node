@@ -124,6 +124,7 @@ func TestTrafficWriteFailureRollsBackCheckpointAndSequence(t *testing.T) {
 	if err := s.ApplyTraffic(ctx, sample(1, 1000, 2000)); err == nil {
 		t.Fatal("injected write accepted")
 	}
+	assertActivity(t, s, "")
 	assertTraffic(t, s, 0, 0, 0, 0)
 	var count int
 	if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM node_traffic_checkpoints").Scan(&count); err != nil || count != 0 {
@@ -137,6 +138,7 @@ func TestTrafficWriteFailureRollsBackCheckpointAndSequence(t *testing.T) {
 	}
 	applySample(t, s, sample(2, 1500, 2500))
 	assertTraffic(t, s, 1500, 2500, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:02Z")
 }
 
 func TestTrafficConcurrentSnapshotsSerialize(t *testing.T) {
@@ -155,6 +157,7 @@ func TestTrafficConcurrentSnapshotsSerialize(t *testing.T) {
 		}
 	}
 	assertTraffic(t, s, 3200, 6400, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:32Z")
 }
 
 func TestTrafficPruningDoesNotRecountAndPreservesActiveOld(t *testing.T) {
@@ -322,9 +325,11 @@ func TestTrafficUncertainCommitReplay(t *testing.T) {
 		t.Fatalf("lost commit response: %v", err)
 	}
 	assertTraffic(t, s, 1000, 2000, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:01Z")
 	applySample(t, fault, sample(1, 1000, 2000))
 	applySample(t, fault, sample(2, 1500, 2500))
 	assertTraffic(t, s, 1500, 2500, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:02Z")
 }
 
 func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
@@ -361,13 +366,13 @@ func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
 	}
 	assertTraffic(t, s, 0, 0, 0, 0)
 	var newest int
-	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 6 {
+	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 7 {
 		t.Fatalf("migration version %d %v", newest, err)
 	}
 }
 
 func TestMigrationRejectsUnknownAndGappedHistory(t *testing.T) {
-	for _, version := range []int{7, 0} {
+	for _, version := range []int{8, 0} {
 		t.Run(string(rune('0'+version)), func(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()

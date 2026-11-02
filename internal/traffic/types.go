@@ -45,6 +45,9 @@ type UserTotal struct {
 	Enabled       bool   `json:"enabled"`
 	UploadBytes   int64  `json:"uploadBytes,string"`
 	DownloadBytes int64  `json:"downloadBytes,string"`
+	// LastActivityAt is the last committed observation of a positive byte delta,
+	// not a packet timestamp or proof that the client is currently connected.
+	LastActivityAt *time.Time `json:"lastActivityAt"`
 }
 
 type Totals struct {

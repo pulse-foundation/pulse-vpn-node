@@ -119,6 +119,7 @@ func TestRotateDeleteRecreatePreserveAccountingAndRetireCredentials(t *testing.T
 	}
 	currentRuntime := snapshot.Active()[0].Name
 	sample.Sequence = 2
+	sample.ObservedAt = now.Add(time.Second)
 	sample.Connections[0].Upload = 150
 	sample.Connections = append(sample.Connections, traffic.Connection{ID: "new-session", User: currentRuntime, StartedAt: now, Upload: 30, Download: 40})
 	if err = s.ApplyTraffic(ctx, sample); err != nil {
@@ -127,6 +128,9 @@ func TestRotateDeleteRecreatePreserveAccountingAndRetireCredentials(t *testing.T
 	totals, err := s.TrafficTotals(ctx)
 	if err != nil || len(totals.Users) != 1 || totals.Users[0].UploadBytes != 180 || totals.Users[0].DownloadBytes != 240 {
 		t.Fatal("credential generations lost or duplicated accounting")
+	}
+	if totals.Users[0].LastActivityAt == nil || !totals.Users[0].LastActivityAt.Equal(now.Add(time.Second)) {
+		t.Fatal("rotation lost activity")
 	}
 	if _, err = s.Change(ctx, node.UserChange{Kind: "rotate", Key: "retry-current", Name: "alice", UUID: rotated, ExpectedRevision: 2}); err != nil {
 		t.Fatal("current credential rotation retry failed")
@@ -150,6 +154,7 @@ func TestRotateDeleteRecreatePreserveAccountingAndRetireCredentials(t *testing.T
 		t.Fatal("deleted user visible in traffic")
 	}
 	sample.Sequence = 3
+	sample.ObservedAt = now.Add(2 * time.Second)
 	sample.Connections[0].Upload = 170
 	if err = s.ApplyTraffic(ctx, sample); err != nil {
 		t.Fatal("late deleted session accounting failed")
@@ -163,6 +168,9 @@ func TestRotateDeleteRecreatePreserveAccountingAndRetireCredentials(t *testing.T
 	totals, _ = s.TrafficTotals(ctx)
 	if len(totals.Users) != 1 || totals.Users[0].UploadBytes != 200 {
 		t.Fatal("recreate reset history")
+	}
+	if totals.Users[0].LastActivityAt == nil || !totals.Users[0].LastActivityAt.Equal(now.Add(2*time.Second)) {
+		t.Fatal("recreate lost activity")
 	}
 	snapshot, _ = s.Snapshot(ctx)
 	if snapshot.Users[0].CredentialRevision != 5 || snapshot.Active()[0].Name == currentRuntime {

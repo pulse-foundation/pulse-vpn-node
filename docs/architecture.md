@@ -461,7 +461,7 @@ the saved tar/config ID is published without rebuilding. Both native Linux archi
 must pass the complete suite. Publication verifies registry manifest digests against the
 saved config IDs and uploads `pulse-node-release.json` last as the readiness marker.
 Manifest v1 contains `version`, `commit`, `verifiedAt`, `protocolVersion: 1`,
-`schemaVersion: 6`, and `architectures.amd64` / `architectures.arm64`, each with immutable
+`schemaVersion: 7`, and `architectures.amd64` / `architectures.arm64`, each with immutable
 `reference` and config `imageId`. Registry manifest digests and Docker config IDs are
 different identifiers. SQL schema metadata describes compatibility; it does not promise
 an automatic schema upgrade.

@@ -682,7 +682,7 @@ components:
           maxItems: 1024
           items:
             type: object
-            required: [name, enabled, uploadBytes, downloadBytes]
+            required: [name, enabled, uploadBytes, downloadBytes, lastActivityAt]
             properties:
               name:
                 type: string
@@ -697,6 +697,11 @@ components:
                 type: string
                 pattern: '^[0-9]+$'
                 description: Destination to client payload bytes
+              lastActivityAt:
+                type: string
+                format: date-time
+                nullable: true
+                description: Latest committed observation of a positive attributed upload or download delta. Approximate observation time, not last packet time or online status. Null means no activity has been recorded since this field became available. Persists across restarts and never decreases.
     Status:
       type: object
       required: [status, vpnConfigured, core, capabilities]

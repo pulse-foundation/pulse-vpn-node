@@ -36,6 +36,8 @@ func TestNode(t *testing.T) {
 				l.managedLifecycle(t)
 			case "Reality":
 				l.reality(t)
+			case "PrivateNetworks":
+				l.privateNetworks(t)
 			default:
 				l.managed(t, c.name)
 			}

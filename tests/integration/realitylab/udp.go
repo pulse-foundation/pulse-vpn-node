@@ -84,6 +84,16 @@ func (s *udpSession) echo() error {
 }
 
 func (s *udpSession) echoUntil(deadline time.Time) error {
+	// Mihomo resolves UDP destinations on the client. Docker deliberately does not
+	// expose backend DNS to this client, so the harness supplies the target IPv4.
+	target := net.ParseIP(os.Getenv("REALITY_TEST_TARGET_IP")).To4()
+	if target == nil {
+		return errors.New("test target IPv4 is required")
+	}
+	return s.echoTo(target, deadline)
+}
+
+func (s *udpSession) echoTo(target net.IP, deadline time.Time) error {
 	conn := s.conn
 	var head [4]byte
 	var port [2]byte
@@ -92,12 +102,6 @@ func (s *udpSession) echoUntil(deadline time.Time) error {
 	}
 	payload := make([]byte, 256)
 	_, _ = rand.Read(payload)
-	// Mihomo resolves UDP destinations on the client. Docker deliberately does not
-	// expose backend DNS to this client, so the harness supplies the target IPv4.
-	target := net.ParseIP(os.Getenv("REALITY_TEST_TARGET_IP")).To4()
-	if target == nil {
-		return errors.New("test target IPv4 is required")
-	}
 	packet := append([]byte{0, 0, 0, 1}, target...)
 	packet = append(packet, byte(9000>>8), byte(9000&255))
 	packet = append(packet, payload...)
@@ -123,6 +127,9 @@ func (s *udpSession) echoUntil(deadline time.Time) error {
 		return err
 	}
 	got, err := io.ReadAll(reader)
+	if bytes.Equal(got, append([]byte("private-target:"), payload...)) {
+		return errors.New("private target returned its unique marker and matching payload")
+	}
 	if err != nil || !bytes.Equal(got, payload) {
 		return errors.New("UDP echo integrity failed")
 	}

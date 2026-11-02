@@ -8,6 +8,11 @@ approximate per-user traffic totals, resource metrics, configured network checks
 in-memory telemetry buffer. PostgreSQL stores users, operations and traffic totals. Pulse owns
 monitoring history; its importer and dashboards are separate work.
 
+This branch contains a candidate [private-destination egress policy](docs/architecture.md#vpn-egress-policy).
+It is **not ready for release**: the real-core regression test demonstrates that a reused UDP
+association can bypass the destination rules. Additional enforcement is required before claiming
+private-network isolation. BitTorrent and SMTP filtering are not included.
+
 ## Launch layout
 
 | File | Purpose |

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -99,12 +100,71 @@ func TestRenderAuthorizesOnlyCurrentInboundUsers(t *testing.T) {
 				expected = append(expected, "IN-USER,"+name+",DIRECT")
 			}
 			expected = append(expected, "MATCH,REJECT")
-			if !slices.Equal(got.Rules, expected) {
+			var authorization []string
+			for _, rule := range got.Rules {
+				if strings.HasPrefix(rule, "IN-USER,") || strings.HasPrefix(rule, "MATCH,") {
+					authorization = append(authorization, rule)
+				} else if len(authorization) != 0 {
+					t.Fatal("destination restrictions must precede user authorization")
+				}
+			}
+			if !slices.Equal(authorization, expected) {
 				t.Fatal("egress is not limited to current identities")
 			}
 			if len(got.Listeners) != 1 || got.Listeners[0].Reality.Proxy != "DIRECT" {
 				t.Fatal("REALITY target cannot dial independently of user authorization")
 			}
 		})
+	}
+}
+
+// A missing prefix, no-resolve, or placing a deny after IN-USER would expose
+// internal services even though the user's credentials are valid.
+func TestRenderPrivateDestinations(t *testing.T) {
+	vpn := &node.VLESS{Listen: "0.0.0.0", Port: 8443, Users: []node.User{{Name: "alice", UUID: "f47ac10b-58cc-4372-a567-0e02b2c3d479"}}, Reality: node.Reality{Destination: "target:8443", PrivateKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), ShortIDs: []string{"abcd"}, ServerNames: []string{"target.test"}}}
+	for _, snapshot := range []*node.VLESS{nil, vpn} {
+		raw, err := render("127.0.0.1:19090", "controller-secret", snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Rules []string `json:"rules"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		var denied []netip.Prefix
+		for _, rule := range got.Rules {
+			if strings.HasPrefix(rule, "IN-USER,") || strings.HasPrefix(rule, "MATCH,") {
+				break
+			}
+			parts := strings.Split(rule, ",")
+			if len(parts) != 3 || (parts[0] != "IP-CIDR" && parts[0] != "IP-CIDR6") || parts[2] != "REJECT" {
+				t.Fatalf("destination denial must resolve DNS: %q", rule)
+			}
+			prefix, err := netip.ParsePrefix(parts[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			denied = append(denied, prefix)
+		}
+		for _, tc := range []struct {
+			ip      string
+			blocked bool
+		}{
+			{"0.1.2.3", true}, {"10.255.255.255", true}, {"100.64.0.1", true}, {"100.127.255.255", true},
+			{"127.0.0.1", true}, {"169.254.169.254", true}, {"172.16.0.1", true}, {"172.31.255.255", true},
+			{"192.168.1.1", true}, {"198.18.0.1", true}, {"224.0.0.1", true}, {"255.255.255.255", true},
+			{"::", true}, {"::1", true}, {"fc00::1", true}, {"fdff::1", true}, {"fe80::1", true}, {"ff02::1", true},
+			{"64:ff9b::a00:1", true}, {"2001:db8::1", true},
+			{"1.1.1.1", false}, {"8.8.8.8", false}, {"100.63.255.255", false}, {"100.128.0.0", false},
+			{"172.15.255.255", false}, {"172.32.0.0", false}, {"192.169.0.1", false}, {"2606:4700:4700::1111", false},
+		} {
+			addr := netip.MustParseAddr(tc.ip)
+			blocked := slices.ContainsFunc(denied, func(p netip.Prefix) bool { return p.Contains(addr) })
+			if blocked != tc.blocked {
+				t.Errorf("destination %s: blocked=%v, want %v", tc.ip, blocked, tc.blocked)
+			}
+		}
 	}
 }

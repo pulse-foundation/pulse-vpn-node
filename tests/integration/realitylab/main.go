@@ -73,6 +73,11 @@ func main() {
 		err = expectRejected(os.Getenv("REALITY_TEST_PROXY"))
 	case "probe":
 		err = probe()
+	case "private-networks":
+		err = privateNetworks()
+		if err != nil {
+			fmt.Println("FAIL: " + err.Error())
+		}
 	case "reject-bad-uuid":
 		err = expectRejected("bad-uuid:7890")
 	case "reject-bad-key":

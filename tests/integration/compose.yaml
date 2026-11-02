@@ -30,7 +30,7 @@ services:
     volumes: ["fixtures:/fixtures:ro"]
     read_only: true
     cap_drop: [ALL]
-    networks: [back]
+    networks: [egress]
     depends_on:
       generate:
         condition: service_completed_successfully
@@ -39,6 +39,13 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  private-target:
+    extends:
+      service: target
+    environment:
+      REALITY_TEST_PRIVATE_TARGET: "true"
+    networks: !override [back]
 
   database:
     environment:
@@ -86,9 +93,11 @@ services:
       - /proc/uptime:/host/proc/uptime:ro
       - /proc/diskstats:/host/proc/diskstats:ro
     restart: "no"
-    networks: [default, back]
+    networks: [default, back, egress]
     depends_on:
       target:
+        condition: service_healthy
+      private-target:
         condition: service_healthy
 
   client:
@@ -150,6 +159,13 @@ networks:
     internal: true
   back:
     internal: true
+  # Synthetic public addresses, strictly inside an internal Docker network.
+  # Allowed VPN traffic must not depend on an exception to the production policy.
+  egress:
+    internal: true
+    ipam:
+      config:
+        - subnet: 11.203.0.0/24
 volumes:
   fixtures:
   traffic-baseline:

@@ -31,6 +31,7 @@ var cases = []struct{ name, project string }{
 	{"ManagedLifecycle", "pulse-vpn-node-managed-lifecycle"},
 	{"ManagedRecovery", "pulse-vpn-node-managed-recovery"},
 	{"Reality", "pulse-vpn-node-reality-test"},
+	{"PrivateNetworks", "pulse-vpn-node-private-networks-test"},
 	{"Users", "pulse-vpn-node-users-test"},
 	{"Expiry", "pulse-vpn-node-expiry-test"},
 	{"BackupRestore", "pulse-vpn-node-backup-restore-test"},
@@ -244,7 +245,7 @@ func (l *lab) inspect(t *testing.T, id string) container {
 func (l *lab) targetIP(t *testing.T) string {
 	t.Helper()
 	id := l.compose(t, "ps", "-q", "target")
-	ip := l.inspect(t, id).NetworkSettings.Networks[l.project+"_back"].IPAddress
+	ip := l.inspect(t, id).NetworkSettings.Networks[l.project+"_egress"].IPAddress
 	need(t, ip != "", "missing backend target address")
 	return ip
 }

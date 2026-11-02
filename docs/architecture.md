@@ -49,6 +49,48 @@ network. Publish only the intended VPN listener publicly. Do not add TUN, NET_AD
 mode, or host networking merely because Mihomo supports them; select networking when real port and
 client-address requirements justify it. Run with the least privileges needed for the chosen ports.
 
+## VPN egress policy
+
+**Work in progress, not an accepted isolation guarantee:** `TestNode/PrivateNetworks` currently
+fails on reused UDP associations. A fresh association to a private address is rejected, but an
+association opened to an allowed address can subsequently reach a private target. The test verifies
+the private target's unique response marker. Mihomo v1.19.33 selects routing once per association
+and sends subsequent destinations without rerouting. Restarting the container does not prevent
+this sequence in a new association. A further enforcement boundary requires a design decision;
+do not release this candidate as complete private-network protection.
+
+Every rendered Mihomo configuration begins with destination `IP-CIDR`/`IP-CIDR6` rejects,
+before the current-user `IN-USER,...,DIRECT` rules and the final `MATCH,REJECT`.
+`internal/mihomo/egress.go` embeds a reviewed snapshot of the
+[geoip private range set](https://github.com/Loyalsoldier/geoip/blob/master/plugin/special/private.go)
+(2026-11-02; the redundant limited-broadcast /32 is covered by 240.0.0.0/4).
+This includes RFC1918, shared address space, loopback, link-local (including common metadata
+addresses), documentation/benchmark, multicast/reserved ranges, IPv6 ULA and standard IPv6
+translation prefixes. The exact list is versioned with the agent; no remote dataset or automatic
+GeoIP update is needed. `no-resolve` is intentionally absent: a domain resolving to a denied
+destination must hit the same rules as a literal IP. Mihomo normalizes mapped IPv4 addresses.
+
+The policy is unconditional for all VPN users in both file-only and managed modes. Startup,
+live-user replacement and recovery all use the same renderer. Replacing the image and recreating
+the container activates it for existing users without SQL migration, new secrets, API settings,
+Compose changes or host firewall commands. Existing connections end during the normal container
+restart; this does not introduce an additional core restart for subsequent user edits.
+
+These are Mihomo route-selection restrictions, not an OS-level egress firewall. The pinned core
+can resolve a TCP domain again when dialing DIRECT; this policy does not promise protection
+against adversarial DNS rebinding/mixed DNS answers or public relays tunneling to other networks.
+It does not classify privately operated services on public IPs. The existing IPv6 DNS setting
+remains disabled, while explicit IPv6 destinations are covered by the deny rules.
+BitTorrent inspection, SMTP/port restrictions, quotas and traffic shaping are outside this change.
+
+The internally configured REALITY handshake target retains its dedicated DIRECT path; it is an
+operator-selected transport dependency, not a user-selectable bypass. The Go agent's own SQL,
+telemetry and management connections do not traverse user routing rules. The integration regression
+gate covers private domain/literal/mapped IPv4 rejection, loopback/management protection, UDP
+denial, permitted TCP/UDP, and policy retention through user reload and restart using isolated peers.
+Reload/restart assertions are not reached until the UDP bypass is resolved; runtime IPv6 rejection
+is also not yet verified.
+
 ## Noninteractive initialization
 
 `pulse-vpn-node init` prepares the four external files consumed by the main Compose:

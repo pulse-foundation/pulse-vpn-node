@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -38,7 +39,11 @@ func serveTarget() error {
 				failures <- err
 				return
 			}
-			if _, err := conn.WriteTo(b[:n], addr); err != nil {
+			reply := b[:n]
+			if os.Getenv("REALITY_TEST_PRIVATE_TARGET") == "true" {
+				reply = append([]byte("private-target:"), reply...)
+			}
+			if _, err := conn.WriteTo(reply, addr); err != nil {
 				failures <- err
 				return
 			}

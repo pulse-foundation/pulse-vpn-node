@@ -113,7 +113,7 @@ func (s *suite) checkCompose(t *testing.T) {
 	lab := s.config(t, "tests/integration/compose.yaml", "PULSE_NODE_VPN_BIND=0.0.0.0", "PULSE_NODE_VPN_PORT=443", "PULSE_NODE_IMAGE=unrelated:do-not-use", "PULSE_NODE_CONFIG_DIR=/does-not-exist/private")
 	checkNode(t, lab)
 	need(t, len(lab.Secrets) == 0, "lab must not use developer secrets")
-	need(t, len(lab.Networks) == 2, "expected two isolated lab networks")
+	need(t, len(lab.Networks) == 3, "expected three isolated lab networks")
 	for _, n := range lab.Networks {
 		need(t, n.Internal, "lab must use internal networks")
 	}
@@ -121,7 +121,7 @@ func (s *suite) checkCompose(t *testing.T) {
 		need(t, len(svc.Ports) == 0 && len(svc.Secrets) == 0, "lab exposes ports or developer secrets")
 		need(t, svc.NetworkMode == "" || svc.NetworkMode == "none", "unexpected lab network mode")
 	}
-	for name, want := range map[string]string{"target": "back", "client": "default", "second": "default", "probe": "default", "bad-key": "default", "bad-uuid": "default", "replacement": "default", "configure": "default"} {
+	for name, want := range map[string]string{"target": "egress", "private-target": "back", "client": "default", "second": "default", "probe": "default", "bad-key": "default", "bad-uuid": "default", "replacement": "default", "configure": "default"} {
 		svc, ok := lab.Services[name]
 		need(t, ok, "missing lab service: "+name)
 		_, ok = svc.Networks[want]

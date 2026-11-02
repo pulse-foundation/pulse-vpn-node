@@ -9,7 +9,7 @@ import (
 // render is deterministic and has no I/O. JSON is accepted by Mihomo's YAML reader.
 func render(address, secret string, vpn *node.VLESS) ([]byte, error) {
 	listeners := []any{}
-	rules := []string{}
+	rules := privateDestinationRules()
 	if vpn != nil {
 		if err := vpn.Validate(); err != nil {
 			return nil, err

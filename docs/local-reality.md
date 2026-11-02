@@ -17,19 +17,30 @@ short IDs and a local TLS certificate, and runs this path:
 
 ```text
 probe → Mihomo client → agent-managed Mihomo server → local target
-        default network [default + back networks]       back network
+        default network [default + back + egress]       egress network
 ```
 
-Both networks are Docker `internal` networks. No port is published to the host; no public TLS target,
+All three networks are Docker `internal` networks. No port is published to the host; no public TLS target,
 production server, desktop proxy or existing VPN credentials participate. The TLS target is reachable
-only from the backend network. The client has a single `MATCH,vpn` rule and no DIRECT fallback.
-UDP uses the target's inspected backend IPv4 because Mihomo resolves UDP destinations on the client,
+only from the egress network, which uses synthetic public addresses in `11.203.0.0/24` without
+an external route. PostgreSQL and a separate private target stay on the private back network.
+This tests the production destination policy without test-only exceptions. The client has a
+single `MATCH,vpn` rule and no DIRECT fallback.
+UDP uses the target's inspected egress IPv4 because Mihomo resolves UDP destinations on the client,
 while Docker intentionally hides backend DNS from the frontend network.
 
 Acceptance checks cover authenticated agent readiness, HTTP and certificate-verified HTTPS with a
 1 MiB random payload echoed intact, and UDP/XUDP echo. Separate clients with a wrong UUID or REALITY
 public key must fail. An occupied VPN port must fail agent startup; stopping the node must prevent
 further transfers. The test helper and generated credentials are not shipped in the agent image.
+
+Run `go test -tags=integration -count=1 -timeout=30m -v ./tests/integration -run '^TestNode/PrivateNetworks$'`
+to verify private destination rejection before/after live-user changes and restart. The private
+target must first be reachable directly from the node, and public TCP/UDP must succeed through the
+same client, so an unavailable target or broken tunnel cannot masquerade as a passing restriction.
+This new regression gate currently fails: an allowed UDP association reaches the private target
+when its destination changes. The private target adds a unique response marker to distinguish
+that bypass from an echo still returned by the original allowed target.
 
 The Go test removes its own project and credential volume even on failure. If interrupted forcibly,
 inspect and remove only this project before rerunning:

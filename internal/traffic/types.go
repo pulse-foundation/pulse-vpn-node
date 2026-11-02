@@ -11,7 +11,8 @@ const MaxConnections = 16384
 const MaxCheckpoints = 131072
 const CheckpointRetention = 24 * time.Hour
 
-// User is the immutable node user key, not a mutable display name or VPN credential.
+// User is a source runtime identity, resolved by Store to the immutable node user
+// key before returning a CommittedObservation. It is never a display name.
 // Upload is client-to-destination; download is destination-to-client, in bytes.
 type Connection struct {
 	ID        string
@@ -36,8 +37,27 @@ type Source interface {
 // for an owned, confirmed core instance; retrying the same generation is idempotent.
 type Store interface {
 	StartTraffic(context.Context, string) (int64, error)
-	ApplyTraffic(context.Context, Snapshot) error
+	ApplyTraffic(context.Context, Snapshot) (*CommittedObservation, error)
 	TrafficTotals(context.Context) (Totals, error)
+}
+
+// CommittedObservation is returned only for a newly committed sample, never for
+// a replay or an uncertain commit. Connections contain resolved stable user keys;
+// unknown identities are empty. UnratedUsers had observations excluded from totals.
+// Users contains the visible stable identities present in that commit.
+type CommittedObservation struct {
+	Snapshot
+	AccountingEpoch    string
+	AccountingSequence int64
+	UnratedUsers       []string
+	Users              []string
+}
+
+type Live struct {
+	ObservedAt             time.Time `json:"observedAt"`
+	UploadBytesPerSecond   *float64  `json:"uploadBytesPerSecond"`
+	DownloadBytesPerSecond *float64  `json:"downloadBytesPerSecond"`
+	ActiveConnections      int       `json:"activeConnections"`
 }
 
 type UserTotal struct {
@@ -48,6 +68,7 @@ type UserTotal struct {
 	// LastActivityAt is the last committed observation of a positive byte delta,
 	// not a packet timestamp or proof that the client is currently connected.
 	LastActivityAt *time.Time `json:"lastActivityAt"`
+	Live           *Live      `json:"live"`
 }
 
 type Totals struct {

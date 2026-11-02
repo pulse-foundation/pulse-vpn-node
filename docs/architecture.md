@@ -398,6 +398,13 @@ and checkpoints; replay and core/agent restart preserve the accounting identity.
 Counters remain nonnegative signed 64-bit values encoded as decimal strings; overflow
 fails the transaction rather than wrapping. Telemetry run IDs never identify accounting.
 
+The collector also derives ephemeral per-user rates and attributed connection counts from
+consecutive successfully committed observations. Its memory-only baseline never changes durable
+accounting; first/reset/gapped intervals have unknown rates, and stale or failed observations
+have no live data. Stable aliases are resolved inside the commit transaction, and each live
+observation is paired only with matching accounting epoch/sequence totals. API reads never
+poll the core. See [traffic accounting](traffic.md#current-rates-and-connections).
+
 The collector publishes a bounded cached copy of committed totals for the optional
 heartbeat `trafficSnapshot`. Export does not wait for SQL or poll the core. A database
 failure omits that snapshot, while heartbeat/resource export continues. Observation

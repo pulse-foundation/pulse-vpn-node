@@ -53,15 +53,15 @@ func validTrafficTime(t time.Time) bool { return !t.IsZero() && t.Year() >= 1970
 
 // ApplyTraffic serializes complete samples. The durable sequence resolves both
 // out-of-order delivery and ambiguous commit retries before inspecting counters.
-func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error {
+func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) (*traffic.CommittedObservation, error) {
 	if !keyPattern.MatchString(sample.Generation) || sample.Sequence <= 0 || !validTrafficTime(sample.ObservedAt) || len(sample.Connections) > traffic.MaxConnections {
-		return node.ErrInvalid
+		return nil, node.ErrInvalid
 	}
 	ids, users := make([]string, 0, len(sample.Connections)), make([]string, 0, len(sample.Connections))
 	seen := make(map[string]bool, len(sample.Connections))
 	for _, c := range sample.Connections {
 		if !keyPattern.MatchString(c.ID) || (c.User != "" && !namePattern.MatchString(c.User)) || !validTrafficTime(c.StartedAt) || c.StartedAt.After(sample.ObservedAt) || c.Upload < 0 || c.Download < 0 || seen[c.ID] {
-			return node.ErrInvalid
+			return nil, node.ErrInvalid
 		}
 		seen[c.ID] = true
 		ids = append(ids, c.ID)
@@ -71,39 +71,39 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 	defer cancel()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	defer tx.Rollback(ctx)
 	var generation string
 	var sequence, resets int64
 	var watermark *time.Time
 	if err = tx.QueryRow(ctx, `SELECT generation,sequence,reset_count,pruned_before FROM node_traffic_state WHERE singleton FOR UPDATE`).Scan(&generation, &sequence, &resets, &watermark); err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	if generation != sample.Generation {
-		return node.ErrConflict
+		return nil, node.ErrConflict
 	}
 	if sample.Sequence <= sequence {
-		return nil
+		return nil, nil
 	}
 	// Resolve every credential generation, including revoked/deleted sessions,
 	// to its stable accounting identity before checkpoint lookup and pruning.
 	aliases, err := tx.Query(ctx, "SELECT runtime_name,user_name FROM node_user_credentials WHERE runtime_name=ANY($1)", users)
 	if err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	attribution := map[string]string{}
 	for aliases.Next() {
 		var runtimeName, name string
 		if aliases.Scan(&runtimeName, &name) != nil {
 			aliases.Close()
-			return node.ErrUnavailable
+			return nil, node.ErrUnavailable
 		}
 		attribution[runtimeName] = name
 	}
 	aliases.Close()
 	if aliases.Err() != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	connections := append([]traffic.Connection(nil), sample.Connections...)
 	for i := range connections {
@@ -124,18 +124,18 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 	}
 	pruned, err := tx.Exec(ctx, `DELETE FROM node_traffic_checkpoints c WHERE last_seen < $1 AND NOT EXISTS (SELECT 1 FROM unnest($2::text[],$3::text[]) AS p(id,usr) WHERE p.id=c.connection_id AND p.usr=c.user_name)`, cutoff, ids, users)
 	if err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	if pruned.RowsAffected() > 0 {
 		watermark = &cutoff
 	}
 	var count int
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM node_traffic_checkpoints").Scan(&count); err != nil || count > traffic.MaxCheckpoints {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	rows, err := tx.Query(ctx, `SELECT c.connection_id,c.user_name,c.upload_bytes,c.download_bytes,c.started_at FROM node_traffic_checkpoints c JOIN unnest($1::text[],$2::text[]) AS p(id,usr) ON p.id=c.connection_id AND p.usr=c.user_name`, ids, users)
 	if err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	checkpoints := make(map[trafficKey]trafficCheckpoint, len(ids))
 	for rows.Next() {
@@ -143,41 +143,50 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 		var cp trafficCheckpoint
 		if err = rows.Scan(&key.id, &key.user, &cp.upload, &cp.download, &cp.started); err != nil {
 			rows.Close()
-			return node.ErrUnavailable
+			return nil, node.ErrUnavailable
 		}
 		checkpoints[key] = cp
 	}
 	rows.Close()
 	if rows.Err() != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
-	rows, err = tx.Query(ctx, "SELECT name FROM node_users WHERE name=ANY($1)", users)
+	rows, err = tx.Query(ctx, "SELECT name,deleted FROM node_users WHERE name=ANY($1) OR NOT deleted", users)
 	if err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	known := make(map[string]bool)
+	visibleUsers := []string{}
 	for rows.Next() {
 		var user string
-		if err = rows.Scan(&user); err != nil {
+		var deleted bool
+		if err = rows.Scan(&user, &deleted); err != nil {
 			rows.Close()
-			return node.ErrUnavailable
+			return nil, node.ErrUnavailable
 		}
 		known[user] = true
+		if !deleted {
+			visibleUsers = append(visibleUsers, user)
+		}
 	}
 	rows.Close()
 	if rows.Err() != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	increments := make(map[string]trafficIncrement)
 	acceptedIDs, acceptedUsers := []string{}, []string{}
 	starts, uploads, downloads := []time.Time{}, []int64{}, []int64{}
 	var skipped int64
+	unrated := map[string]bool{}
 	for _, c := range sample.Connections {
 		key := trafficKey{c.ID, c.User}
 		cp, exists := checkpoints[key]
 		started := c.StartedAt.Truncate(time.Microsecond)
 		if !known[c.User] || (!exists && ((watermark != nil && !started.After(*watermark)) || count >= traffic.MaxCheckpoints)) {
 			skipped++
+			if known[c.User] {
+				unrated[c.User] = true
+			}
 			continue
 		}
 		up, down := c.Upload, c.Download
@@ -202,7 +211,7 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 			}
 			if reset {
 				if resets == math.MaxInt64 {
-					return node.ErrUnavailable
+					return nil, node.ErrUnavailable
 				}
 				resets++
 			}
@@ -211,7 +220,7 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 		}
 		inc := increments[c.User]
 		if up > math.MaxInt64-inc.upload || down > math.MaxInt64-inc.download {
-			return node.ErrUnavailable
+			return nil, node.ErrUnavailable
 		}
 		inc.upload += up
 		inc.download += down
@@ -239,15 +248,22 @@ func (s *Store) ApplyTraffic(ctx context.Context, sample traffic.Snapshot) error
 		upload_bytes=node_traffic_totals.upload_bytes+excluded.upload_bytes,
 		download_bytes=node_traffic_totals.download_bytes+excluded.download_bytes,
 		last_activity_at=GREATEST(node_traffic_totals.last_activity_at,excluded.last_activity_at)`, totalUsers, totalUploads, totalDownloads, sample.ObservedAt); err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO node_traffic_checkpoints(connection_id,user_name,started_at,upload_bytes,download_bytes,last_seen) SELECT id,usr,started,up,down,$6 FROM unnest($1::text[],$2::text[],$3::timestamptz[],$4::bigint[],$5::bigint[]) AS p(id,usr,started,up,down) ON CONFLICT(connection_id,user_name) DO UPDATE SET started_at=excluded.started_at,upload_bytes=excluded.upload_bytes,download_bytes=excluded.download_bytes,last_seen=GREATEST(node_traffic_checkpoints.last_seen,excluded.last_seen)`, acceptedIDs, acceptedUsers, starts, uploads, downloads, sample.ObservedAt); err != nil {
-		return node.ErrUnavailable
+		return nil, node.ErrUnavailable
 	}
-	if _, err = tx.Exec(ctx, `UPDATE node_traffic_state SET accounting_sequence=accounting_sequence+1,sequence=$1,observed_at=$2,pruned_before=$3,reset_count=$4,skipped_connections=$5 WHERE singleton`, sample.Sequence, sample.ObservedAt, watermark, resets, skipped); err != nil {
-		return node.ErrUnavailable
+	result := &traffic.CommittedObservation{Snapshot: sample, Users: visibleUsers}
+	for user := range unrated {
+		result.UnratedUsers = append(result.UnratedUsers, user)
 	}
-	return sanitized(tx.Commit(ctx))
+	if err = tx.QueryRow(ctx, `UPDATE node_traffic_state SET accounting_sequence=accounting_sequence+1,sequence=$1,observed_at=$2,pruned_before=$3,reset_count=$4,skipped_connections=$5 WHERE singleton RETURNING accounting_epoch::text,accounting_sequence`, sample.Sequence, sample.ObservedAt, watermark, resets, skipped).Scan(&result.AccountingEpoch, &result.AccountingSequence); err != nil {
+		return nil, node.ErrUnavailable
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, node.ErrUnavailable
+	}
+	return result, nil
 }
 
 func (s *Store) TrafficTotals(ctx context.Context) (traffic.Totals, error) {

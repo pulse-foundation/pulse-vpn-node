@@ -20,7 +20,8 @@ type View struct {
 }
 
 // Collector has one application-owned Run loop. Persistence owns every counter
-// baseline; failed or ambiguous commits never advance an in-memory byte total.
+// baseline for durable totals; failed or ambiguous commits never advance an
+// in-memory byte total. Ephemeral rates use only confirmed observations.
 type Collector struct {
 	source      Source
 	store       Store
@@ -30,6 +31,8 @@ type Collector struct {
 	mu          sync.RWMutex
 	state       string
 	exported    *View
+	previous    *CommittedObservation
+	live        *liveObservation
 }
 
 // NewCollector must follow a confirmed new owned child start, never an unverified
@@ -61,6 +64,8 @@ func (c *Collector) step(ctx context.Context) {
 	c.state = "collecting"
 	if err != nil {
 		c.state = "degraded"
+		c.previous = nil
+		c.live = nil
 	}
 	c.mu.Unlock()
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -69,6 +74,10 @@ func (c *Collector) step(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.exported = nil
+	if readErr != nil {
+		c.previous = nil
+		c.live = nil
+	}
 	if readErr == nil && view.ObservedAt != nil {
 		c.exported = &view
 	}
@@ -83,14 +92,14 @@ func (c *Collector) ExportSnapshot() *View {
 		return nil
 	}
 	copy := *c.exported
-	copy.Users = append([]UserTotal{}, copy.Users...)
-	for i := range copy.Users {
-		if activity := copy.Users[i].LastActivityAt; activity != nil {
-			value := *activity
-			copy.Users[i].LastActivityAt = &value
+	copy.Totals = cloneTotals(copy.Totals)
+	copy.Stale = observationStale(copy.ObservedAt)
+	if copy.Stale {
+		for i := range copy.Users {
+			copy.Users[i].Live = nil
 		}
 	}
-	copy.Stale = copy.ObservedAt == nil || time.Since(*copy.ObservedAt) > 5*PollInterval
+
 	return &copy
 }
 
@@ -115,7 +124,22 @@ func (c *Collector) collect(ctx context.Context) error {
 		return errors.New("traffic observation limit exceeded")
 	}
 	c.sequence++
-	return c.store.ApplyTraffic(ctx, Snapshot{Generation: c.generation, Sequence: c.sequence, ObservedAt: time.Now().UTC(), Connections: connections})
+	observation, err := c.store.ApplyTraffic(ctx, Snapshot{Generation: c.generation, Sequence: c.sequence, ObservedAt: time.Now().UTC(), Connections: connections})
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if observation == nil {
+		c.previous = nil
+		c.live = nil
+		return nil
+	}
+	c.live = observeLive(observation, c.previous)
+	baseline := *observation
+	baseline.Connections = append([]Connection(nil), observation.Connections...)
+	c.previous = &baseline
+	return nil
 }
 
 // View reads bounded durable totals, without contacting the core. An unavailable
@@ -127,9 +151,19 @@ func (c *Collector) View(ctx context.Context) (View, error) {
 	}
 	c.mu.RLock()
 	state := c.state
+	totals = cloneTotals(totals)
+	for i := range totals.Users {
+		totals.Users[i].Live = nil
+		if live := c.live; live != nil && state != "degraded" && !observationStale(&live.observedAt) && live.epoch == totals.AccountingEpoch && live.sequence == totals.AccountingSequence {
+			user, ok := live.users[totals.Users[i].Name]
+			if ok {
+				totals.Users[i].Live = cloneLive(&user)
+			}
+		}
+	}
 	c.mu.RUnlock()
 	view := View{Totals: totals, Approximate: true, PollIntervalSeconds: int(PollInterval / time.Second), State: state,
-		Stale: totals.ObservedAt == nil || time.Since(*totals.ObservedAt) > 5*PollInterval}
+		Stale: observationStale(totals.ObservedAt)}
 	if state == "degraded" {
 		view.Error = "traffic collection unavailable"
 	}

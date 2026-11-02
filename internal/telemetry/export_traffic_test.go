@@ -28,7 +28,7 @@ func TestHeartbeatCarriesDurableTrafficAndOmitsUnavailable(t *testing.T) {
 	exporter.session = session
 	observed := time.Now().UTC()
 	exporter.trafficSnapshot = func() *traffic.View {
-		return &traffic.View{Totals: traffic.Totals{AccountingEpoch: "11111111-1111-4111-8111-111111111111", AccountingSequence: 9007199254740993, ObservedAt: &observed, Users: []traffic.UserTotal{{Name: "stable-user", UploadBytes: 9007199254740993, DownloadBytes: 42, LastActivityAt: &observed}, {Name: "unused"}}}, Approximate: true, PollIntervalSeconds: 2, State: "collecting"}
+		return &traffic.View{Totals: traffic.Totals{AccountingEpoch: "11111111-1111-4111-8111-111111111111", AccountingSequence: 9007199254740993, ObservedAt: &observed, Users: []traffic.UserTotal{{Name: "stable-user", UploadBytes: 9007199254740993, DownloadBytes: 42, LastActivityAt: &observed, Live: &traffic.Live{ObservedAt: observed, ActiveConnections: 2}}, {Name: "unused"}}}, Approximate: true, PollIntervalSeconds: 2, State: "collecting"}
 	}
 	if err := exporter.sendHeartbeat(context.Background()); err != nil {
 		t.Fatal(err)
@@ -41,6 +41,7 @@ func TestHeartbeatCarriesDurableTrafficAndOmitsUnavailable(t *testing.T) {
 		Sequence string `json:"accountingSequence"`
 		Users    []struct {
 			Upload         string          `json:"uploadBytes"`
+			Live           json.RawMessage `json:"live"`
 			LastActivityAt json.RawMessage `json:"lastActivityAt"`
 		} `json:"users"`
 	}
@@ -49,6 +50,10 @@ func TestHeartbeatCarriesDurableTrafficAndOmitsUnavailable(t *testing.T) {
 	}
 	if wire.Sequence != "9007199254740993" || wire.Users[0].Upload != "9007199254740993" || len(snapshots[1]) != 0 {
 		t.Fatal("traffic precision or independent heartbeat lost")
+	}
+	var live traffic.Live
+	if err := json.Unmarshal(wire.Users[0].Live, &live); err != nil || live.ActiveConnections != 2 || !live.ObservedAt.Equal(observed) || live.UploadBytesPerSecond != nil || string(wire.Users[1].Live) != "null" {
+		t.Fatal("heartbeat lost live observation or nullable fields")
 	}
 	var activity time.Time
 	if err := json.Unmarshal(wire.Users[0].LastActivityAt, &activity); err != nil || !activity.Equal(observed) || string(wire.Users[1].LastActivityAt) != "null" {

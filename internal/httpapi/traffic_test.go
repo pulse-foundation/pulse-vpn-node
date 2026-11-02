@@ -24,7 +24,7 @@ func TestTrafficEndpoint(t *testing.T) {
 		if _, ok := ctx.Deadline(); !ok {
 			t.Fatal("unbounded database read")
 		}
-		return traffic.View{Approximate: true, State: "collecting", Totals: traffic.Totals{Users: []traffic.UserTotal{{Name: "alice", Enabled: false, UploadBytes: 9007199254740993, DownloadBytes: 8, LastActivityAt: &activity}, {Name: "bob", Enabled: true}}}}, nil
+		return traffic.View{Approximate: true, State: "collecting", Totals: traffic.Totals{Users: []traffic.UserTotal{{Name: "alice", Enabled: false, UploadBytes: 9007199254740993, DownloadBytes: 8, LastActivityAt: &activity, Live: &traffic.Live{ObservedAt: activity, ActiveConnections: 2}}, {Name: "bob", Enabled: true}}}}, nil
 	})
 	h := NewWithTraffic("test-token", true, func(context.Context) (string, error) { t.Fatal("traffic read probed core"); return "", nil }, nil, reader)
 	request := func(auth bool) *httptest.ResponseRecorder {
@@ -45,6 +45,9 @@ func TestTrafficEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"lastActivityAt":"2026-10-30T12:00:02Z"`) || !strings.Contains(w.Body.String(), `"lastActivityAt":null`) {
 		t.Fatal("traffic response lost activity timestamp or explicit unknown value")
+	}
+	if !strings.Contains(w.Body.String(), `"live":{"observedAt":"2026-10-30T12:00:02Z","uploadBytesPerSecond":null,"downloadBytesPerSecond":null,"activeConnections":2}`) || !strings.Contains(w.Body.String(), `"live":null`) {
+		t.Fatal("traffic response lost live fields or explicit unknown")
 	}
 	reader = func(context.Context) (traffic.View, error) { return traffic.View{}, errors.New("private DSN") }
 	h = NewWithTraffic("test-token", true, nil, nil, reader)

@@ -660,7 +660,7 @@ components:
           enum: [starting, collecting, degraded]
         stale:
           type: boolean
-          description: No committed observation or observation older than ten seconds
+          description: No committed observation, observation older than ten seconds, or observation in the future
         observedAt:
           type: string
           format: date-time
@@ -682,7 +682,7 @@ components:
           maxItems: 1024
           items:
             type: object
-            required: [name, enabled, uploadBytes, downloadBytes, lastActivityAt]
+            required: [name, enabled, uploadBytes, downloadBytes, lastActivityAt, live]
             properties:
               name:
                 type: string
@@ -702,6 +702,31 @@ components:
                 format: date-time
                 nullable: true
                 description: Latest committed observation of a positive attributed upload or download delta. Approximate observation time, not last packet time or online status. Null means no activity has been recorded since this field became available. Persists across restarts and never decreases.
+              live:
+                type: object
+                nullable: true
+                description: Ephemeral observation aligned to this committed accounting snapshot. Null before collection, after failures or replay, when mismatched, or older than ten seconds. Connection counts describe attributed core connections, never devices or online status.
+                required: [observedAt, uploadBytesPerSecond, downloadBytesPerSecond, activeConnections]
+                properties:
+                  observedAt:
+                    type: string
+                    format: date-time
+                    description: Source observation time, preserved when exporting in a heartbeat
+                  uploadBytesPerSecond:
+                    type: number
+                    minimum: 0
+                    nullable: true
+                    description: Approximate client-to-destination payload rate over consecutive successful observations; null without a trustworthy interval
+                  downloadBytesPerSecond:
+                    type: number
+                    minimum: 0
+                    nullable: true
+                    description: Approximate destination-to-client payload rate over consecutive successful observations; null without a trustworthy interval
+                  activeConnections:
+                    type: integer
+                    minimum: 0
+                    maximum: 16384
+                    description: Known connections attributed to this stable user in the bounded source snapshot, including retained revoked credential identities
     Status:
       type: object
       required: [status, vpnConfigured, core, capabilities]

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const BackupSchemaVersion = 6
+const BackupSchemaVersion = 7
 const maxBackupSize = 64 << 20
 
 // DatabaseBackup is a secret-bearing logical snapshot, never an HTTP/log DTO.
@@ -110,7 +110,9 @@ func recoveryID() (string, error) {
 // RestoreBackup requires a fresh database. It never overwrites a serving store.
 // Without complete current intent every restored identity stays durably held.
 func (s *Store) RestoreBackup(ctx context.Context, b DatabaseBackup, intent *RecoveryIntent) (RecoveryResult, error) {
-	if b.FormatVersion != 1 || b.SchemaVersion != BackupSchemaVersion || b.Revision < 1 || b.Revision >= int64(1<<63-1) {
+	// Schema 6 differs only by the nullable activity column. PostgreSQL restores
+	// its missing JSON field as NULL; older backups must not invent activity.
+	if b.FormatVersion != 1 || (b.SchemaVersion != 6 && b.SchemaVersion != BackupSchemaVersion) || b.Revision < 1 || b.Revision >= int64(1<<63-1) {
 		return RecoveryResult{}, node.ErrInvalid
 	}
 	raw, err := json.Marshal(b)

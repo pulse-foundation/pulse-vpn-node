@@ -63,7 +63,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 }
 func (s *Store) Close() { s.pool.Close() }
 
-var schemaMigrationFiles = []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql", "migrations/005_traffic_accounting.sql", "migrations/006_recovery_holds.sql"}
+var schemaMigrationFiles = []string{"migrations/001_users.sql", "migrations/002_traffic.sql", "migrations/003_node_lifecycle.sql", "migrations/004_access_policy.sql", "migrations/005_traffic_accounting.sql", "migrations/006_recovery_holds.sql", "migrations/007_last_activity.sql"}
 
 // Migrate applies reviewed embedded SQL atomically and records its checksum.
 // Existing migration contents cannot change silently, and a newer schema is

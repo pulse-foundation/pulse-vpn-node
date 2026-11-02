@@ -10,13 +10,16 @@ import (
 )
 
 type memoryStore struct {
-	mu        sync.Mutex
-	sequence  int64
-	samples   []Snapshot
-	startFail bool
-	writeFail bool
-	readFail  bool
-	committed Totals
+	mu                sync.Mutex
+	sequence          int64
+	samples           []Snapshot
+	startFail         bool
+	writeFail         bool
+	readFail          bool
+	committed         Totals
+	replay            bool
+	observationOffset time.Duration
+	unrated           []string
 }
 
 func (s *memoryStore) StartTraffic(context.Context, string) (int64, error) {
@@ -27,16 +30,25 @@ func (s *memoryStore) StartTraffic(context.Context, string) (int64, error) {
 	}
 	return s.sequence, nil
 }
-func (s *memoryStore) ApplyTraffic(_ context.Context, sample Snapshot) error {
+func (s *memoryStore) ApplyTraffic(_ context.Context, sample Snapshot) (*CommittedObservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.samples = append(s.samples, sample)
 	if s.writeFail {
-		return errors.New("private write detail")
+		return nil, errors.New("private write detail")
 	}
+	if s.replay {
+		return nil, nil
+	}
+	sample.ObservedAt = sample.ObservedAt.Add(s.observationOffset)
 	s.sequence = sample.Sequence
 	s.committed.ObservedAt = &sample.ObservedAt
-	return nil
+	s.committed.AccountingSequence++
+	users := make([]string, 0, len(s.committed.Users))
+	for _, user := range s.committed.Users {
+		users = append(users, user.Name)
+	}
+	return &CommittedObservation{Snapshot: sample, Users: users, UnratedUsers: append([]string(nil), s.unrated...), AccountingEpoch: s.committed.AccountingEpoch, AccountingSequence: s.committed.AccountingSequence}, nil
 }
 func (s *memoryStore) TrafficTotals(context.Context) (Totals, error) {
 	s.mu.Lock()

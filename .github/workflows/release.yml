@@ -56,7 +56,7 @@ jobs:
             echo 'Release metadata already published; refusing replacement. Use a new version.' >&2
             exit 1
           fi
-          printf '{"tag":"%s","version":"%s","commit":"%s","verifiedAt":"%s","protocolVersion":1,"schemaVersion":6,"architectures":{}}' \
+          printf '{"tag":"%s","version":"%s","commit":"%s","verifiedAt":"%s","protocolVersion":1,"schemaVersion":7,"architectures":{}}' \
             "$RELEASE_TAG" "$VERSION" "$COMMIT" "$(sort verified-images/*.verified-at | tail -1)" > input.json
           digests=()
           for arch in amd64 arm64; do

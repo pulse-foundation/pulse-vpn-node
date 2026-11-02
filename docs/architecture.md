@@ -398,6 +398,13 @@ and checkpoints; replay and core/agent restart preserve the accounting identity.
 Counters remain nonnegative signed 64-bit values encoded as decimal strings; overflow
 fails the transaction rather than wrapping. Telemetry run IDs never identify accounting.
 
+The collector also derives ephemeral per-user rates and attributed connection counts from
+consecutive successfully committed observations. Its memory-only baseline never changes durable
+accounting; first/reset/gapped intervals have unknown rates, and stale or failed observations
+have no live data. Stable aliases are resolved inside the commit transaction, and each live
+observation is paired only with matching accounting epoch/sequence totals. API reads never
+poll the core. See [traffic accounting](traffic.md#current-rates-and-connections).
+
 The collector publishes a bounded cached copy of committed totals for the optional
 heartbeat `trafficSnapshot`. Export does not wait for SQL or poll the core. A database
 failure omits that snapshot, while heartbeat/resource export continues. Observation
@@ -461,7 +468,7 @@ the saved tar/config ID is published without rebuilding. Both native Linux archi
 must pass the complete suite. Publication verifies registry manifest digests against the
 saved config IDs and uploads `pulse-node-release.json` last as the readiness marker.
 Manifest v1 contains `version`, `commit`, `verifiedAt`, `protocolVersion: 1`,
-`schemaVersion: 6`, and `architectures.amd64` / `architectures.arm64`, each with immutable
+`schemaVersion: 7`, and `architectures.amd64` / `architectures.arm64`, each with immutable
 `reference` and config `imageId`. Registry manifest digests and Docker config IDs are
 different identifiers. SQL schema metadata describes compatibility; it does not promise
 an automatic schema upgrade.

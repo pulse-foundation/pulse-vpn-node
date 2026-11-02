@@ -38,7 +38,7 @@ func sample(sequence, upload, download int64) traffic.Snapshot {
 }
 func applySample(t *testing.T, s *Store, v traffic.Snapshot) {
 	t.Helper()
-	if err := s.ApplyTraffic(context.Background(), v); err != nil {
+	if _, err := s.ApplyTraffic(context.Background(), v); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -87,7 +87,7 @@ func TestTrafficReplayOrderingAndReopen(t *testing.T) {
 	if got := assertTraffic(t, reopened, 2550, 4800, 1, 0); got.ObservedAt != nil {
 		t.Fatal("new generation retained observation")
 	}
-	if err = reopened.ApplyTraffic(ctx, sample(8, 9999, 9999)); !errors.Is(err, node.ErrConflict) {
+	if _, err = reopened.ApplyTraffic(ctx, sample(8, 9999, 9999)); !errors.Is(err, node.ErrConflict) {
 		t.Fatalf("old generation: %v", err)
 	}
 	next := sample(1, 20, 30)
@@ -121,9 +121,10 @@ func TestTrafficWriteFailureRollsBackCheckpointAndSequence(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `ALTER TABLE node_traffic_state ADD CONSTRAINT reject_fixture CHECK(sequence<>1)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ApplyTraffic(ctx, sample(1, 1000, 2000)); err == nil {
+	if _, err := s.ApplyTraffic(ctx, sample(1, 1000, 2000)); err == nil {
 		t.Fatal("injected write accepted")
 	}
+	assertActivity(t, s, "")
 	assertTraffic(t, s, 0, 0, 0, 0)
 	var count int
 	if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM node_traffic_checkpoints").Scan(&count); err != nil || count != 0 {
@@ -137,6 +138,7 @@ func TestTrafficWriteFailureRollsBackCheckpointAndSequence(t *testing.T) {
 	}
 	applySample(t, s, sample(2, 1500, 2500))
 	assertTraffic(t, s, 1500, 2500, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:02Z")
 }
 
 func TestTrafficConcurrentSnapshotsSerialize(t *testing.T) {
@@ -145,7 +147,11 @@ func TestTrafficConcurrentSnapshotsSerialize(t *testing.T) {
 	errs := make(chan error, 32)
 	for i := int64(1); i <= 32; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); errs <- s.ApplyTraffic(context.Background(), sample(i, i*100, i*200)) }()
+		go func() {
+			defer wg.Done()
+			_, err := s.ApplyTraffic(context.Background(), sample(i, i*100, i*200))
+			errs <- err
+		}()
 	}
 	wg.Wait()
 	close(errs)
@@ -155,6 +161,7 @@ func TestTrafficConcurrentSnapshotsSerialize(t *testing.T) {
 		}
 	}
 	assertTraffic(t, s, 3200, 6400, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:32Z")
 }
 
 func TestTrafficPruningDoesNotRecountAndPreservesActiveOld(t *testing.T) {
@@ -189,7 +196,10 @@ func TestTrafficCapacityPreservesExistingCheckpoints(t *testing.T) {
 	}
 	v := sample(1, 100, 200)
 	v.Connections = append(v.Connections, traffic.Connection{ID: "capacity-1", User: "alice", StartedAt: trafficTime, Upload: 15, Download: 27})
-	applySample(t, s, v)
+	result, err := s.ApplyTraffic(ctx, v)
+	if err != nil || result == nil || len(result.UnratedUsers) != 1 || result.UnratedUsers[0] != "alice" || len(result.Connections) != 2 {
+		t.Fatal("capacity-skipped connection lost count or rate invalidation")
+	}
 	assertTraffic(t, s, 5, 7, 0, 1)
 	var count int
 	if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM node_traffic_checkpoints").Scan(&count); err != nil || count != traffic.MaxCheckpoints {
@@ -203,7 +213,7 @@ func TestTrafficOverflowIsAtomic(t *testing.T) {
 		applySample(t, s, sample(1, math.MaxInt64, 0))
 		v := sample(2, 1, 1)
 		v.Connections[0].ID = "other"
-		if err := s.ApplyTraffic(context.Background(), v); !errors.Is(err, node.ErrUnavailable) {
+		if _, err := s.ApplyTraffic(context.Background(), v); !errors.Is(err, node.ErrUnavailable) {
 			t.Fatalf("overflow: %v", err)
 		}
 		assertTraffic(t, s, math.MaxInt64, 0, 0, 0)
@@ -215,7 +225,7 @@ func TestTrafficOverflowIsAtomic(t *testing.T) {
 		s, _ := trafficStore(t)
 		v := sample(1, math.MaxInt64, 0)
 		v.Connections = append(v.Connections, traffic.Connection{ID: "other", User: "alice", StartedAt: trafficTime, Upload: 1})
-		if err := s.ApplyTraffic(context.Background(), v); !errors.Is(err, node.ErrUnavailable) {
+		if _, err := s.ApplyTraffic(context.Background(), v); !errors.Is(err, node.ErrUnavailable) {
 			t.Fatalf("overflow: %v", err)
 		}
 		assertTraffic(t, s, 0, 0, 0, 0)
@@ -226,7 +236,7 @@ func TestTrafficOverflowIsAtomic(t *testing.T) {
 		if _, err := s.pool.Exec(context.Background(), "UPDATE node_traffic_state SET reset_count=$1", int64(math.MaxInt64)); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.ApplyTraffic(context.Background(), sample(2, 1, 2)); !errors.Is(err, node.ErrUnavailable) {
+		if _, err := s.ApplyTraffic(context.Background(), sample(2, 1, 2)); !errors.Is(err, node.ErrUnavailable) {
 			t.Fatalf("overflow: %v", err)
 		}
 		assertTraffic(t, s, 100, 200, math.MaxInt64, 0)
@@ -244,7 +254,7 @@ func TestTrafficInputValidationIsAtomic(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			v := sample(1, 100, 200)
 			mutate(&v)
-			if err := s.ApplyTraffic(context.Background(), v); !errors.Is(err, node.ErrInvalid) {
+			if _, err := s.ApplyTraffic(context.Background(), v); !errors.Is(err, node.ErrInvalid) {
 				t.Fatalf("invalid accepted: %v", err)
 			}
 			assertTraffic(t, s, 0, 0, 0, 0)
@@ -318,13 +328,17 @@ func TestTrafficUncertainCommitReplay(t *testing.T) {
 		t.Fatal("connect fault fixture")
 	}
 	armed.Store(true)
-	if err = fault.ApplyTraffic(ctx, sample(1, 1000, 2000)); !errors.Is(err, node.ErrUnavailable) {
+	if result, err := fault.ApplyTraffic(ctx, sample(1, 1000, 2000)); result != nil || !errors.Is(err, node.ErrUnavailable) {
 		t.Fatalf("lost commit response: %v", err)
 	}
 	assertTraffic(t, s, 1000, 2000, 0, 0)
-	applySample(t, fault, sample(1, 1000, 2000))
+	assertActivity(t, s, "2026-10-30T12:00:01Z")
+	if result, err := fault.ApplyTraffic(ctx, sample(1, 1000, 2000)); err != nil || result != nil {
+		t.Fatal("uncertain commit replay emitted observation")
+	}
 	applySample(t, fault, sample(2, 1500, 2500))
 	assertTraffic(t, s, 1500, 2500, 0, 0)
+	assertActivity(t, s, "2026-10-30T12:00:02Z")
 }
 
 func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
@@ -361,13 +375,13 @@ func TestTrafficMigrationUpgradePreservesUsers(t *testing.T) {
 	}
 	assertTraffic(t, s, 0, 0, 0, 0)
 	var newest int
-	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 6 {
+	if err = s.pool.QueryRow(ctx, "SELECT max(version) FROM node_schema_migrations").Scan(&newest); err != nil || newest != 7 {
 		t.Fatalf("migration version %d %v", newest, err)
 	}
 }
 
 func TestMigrationRejectsUnknownAndGappedHistory(t *testing.T) {
-	for _, version := range []int{7, 0} {
+	for _, version := range []int{8, 0} {
 		t.Run(string(rune('0'+version)), func(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()

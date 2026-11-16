@@ -1,7 +1,7 @@
 # Overlay on the root compose.yaml, used by every smoke runner.
 # Only fixtures, test peers and isolation differ from the complete node.
 x-client: &client
-  image: metacubex/mihomo:v1.19.33@sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c
+  image: metacubex/mihomo:v1.19.34@sha256:4c2495d705f152897a58eac410350f243835fd01ce2fe44949a571faa824d532
   user: "10001:10001"
   volumes: ["fixtures:/fixtures:ro"]
   tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,mode=1777"]

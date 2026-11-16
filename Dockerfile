@@ -15,7 +15,7 @@ ARG NODE_VERSION=dev
 ARG NODE_COMMIT=unknown
 RUN CGO_ENABLED=0 go build -ldflags="-X github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo.version=${NODE_VERSION} -X github.com/pulse-foundation/pulse-vpn-node/internal/buildinfo.commit=${NODE_COMMIT}" -trimpath -o /out/pulse-vpn-node ./cmd/pulse-vpn-node
 
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS runtime
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS runtime
 COPY --from=check /out/pulse-vpn-node /usr/local/bin/pulse-vpn-node
 COPY --from=core /mihomo /usr/local/bin/mihomo
 COPY --from=check /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
